@@ -1,0 +1,45 @@
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── React Native / Expo (rn_app) ──────────────────────────────────────────────
+rn_app/node_modules/
+rn_app/.expo/
+rn_app/dist/
+rn_app/.metro-health-check*
+rn_app/android/
+rn_app/ios/
+rn_app/*.orig.*
+rn_app/web-build/
+
+# ── Python (ai_service) ───────────────────────────────────────────────────────
+ai_service/.venv/
+ai_service/__pycache__/
+ai_service/**/__pycache__/
+ai_service/**/*.pyc
+ai_service/**/*.pyo
+ai_service/.pytest_cache/
+ai_service/*.egg-info/
+ai_service/dist/
+ai_service/build/
+
+# ── Go (backend) ──────────────────────────────────────────────────────────────
+backend/bin/
+backend/*.exe
+backend/*.test
+backend/vendor/
+
+# ── Docker / Infra ────────────────────────────────────────────────────────────
+infra/pgdata/
+infra/redisdata/
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
+desktop.ini
