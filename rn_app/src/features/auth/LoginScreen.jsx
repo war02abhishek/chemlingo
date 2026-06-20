@@ -3,10 +3,9 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, SafeAreaView,
 } from 'react-native';
-import { CommonActions } from '@react-navigation/native';
 import { login } from '../../core/api';
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ navigation, onLoginSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,9 +16,7 @@ export default function LoginScreen({ navigation }) {
     setError(null);
     try {
       await login(email.trim(), password);
-      navigation.dispatch(
-        CommonActions.reset({ index: 0, routes: [{ name: 'Main' }] })
-      );
+      onLoginSuccess?.();
     } catch {
       setError('Invalid credentials');
     } finally {

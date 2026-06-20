@@ -20,32 +20,3 @@ export async function login(email, password) {
 export async function logout() {
   await AsyncStorage.removeItem('jwt');
 }
-
-export async function getDueDrills() {
-  const { data } = await http.get('/api/v1/drills/due');
-  return data.drills ?? [];
-}
-
-export async function submitAttempt({ drillId, isCorrect, timeTakenMs, answer }) {
-  const { data } = await http.post('/api/v1/drills/attempt', {
-    drill_id: drillId,
-    is_correct: isCorrect,
-    time_taken_ms: timeTakenMs,
-    answer,
-  });
-  return data;
-}
-
-export async function getLeaderboard() {
-  const { data } = await http.get('/api/v1/leaderboard');
-  return data.leaderboard ?? [];
-}
-
-export async function getHint({ questionData, studentAnswer, correctAnswer }) {
-  const { data } = await http.post('/api/v1/hint', {
-    question_data: questionData,
-    student_answer: studentAnswer,
-    correct_answer: correctAnswer,
-  });
-  return data.hint;
-}
