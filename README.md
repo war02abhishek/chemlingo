@@ -11,14 +11,23 @@ Real-time 1v1 equation-balancing duels over WebSocket.
 
 | Layer | Status | Notes |
 |---|---|---|
-| Go backend (auth + duel hub) | Working | Runs on `:8080` |
-| React Native app (Android) | Working | Native APK build, embedded JS bundle |
-| Login → DuelScreen flow | Working | JWT stored in AsyncStorage |
-| WebSocket matchmaking | Working | 2-player queue, auto-pairs |
-| Round start / equation display | Working | Slots, chips, separator |
-| HP bar animations | Working | Reanimated `withTiming` |
-| Submit answer + validation | Working | Damage formula, wrong-attempt penalty |
-| Round end / match end overlay | Working | Win/lose screen with final HP |
+| Go backend (auth + duel hub) | ✅ Working | Runs on `:8080` |
+| React Native app (Android) | ✅ Working | Native APK build, embedded JS bundle |
+| Login → DuelScreen flow | ✅ Working | JWT stored in AsyncStorage |
+| WebSocket matchmaking | ✅ Working | 2-player queue, auto-pairs |
+| Round start / equation display | ✅ Working | Slots, chips, separator |
+| HP bar animations | ✅ Working | Reanimated `withTiming` |
+| Submit answer + validation | ✅ Working | Damage formula, wrong-attempt penalty |
+| Round end / match end overlay | ✅ Working | Win/lose screen with final HP |
+| Profile screen + XP history | ✅ Working | `GET /api/v1/profile`, `GET /api/v1/profile/history` |
+| Global Leaderboard | ✅ Working | `GET /api/v1/leaderboard`, public profile view |
+| Home screen with game cards | ✅ Working | Reaction Duel, Periodic Sprint, Molecule Builder, Global Leaderboard |
+| **Daily Challenge** | ✅ Working | Full flow: intro → quiz (5 Qs) → results + leaderboard |
+| Daily Challenge — seeded question selection | ✅ Working | FNV32a hash of UTC date → `math/rand.Perm(15)` — same 5 questions for all players |
+| Daily Challenge — server-side validation | ✅ Working | Answers never sent to client; re-validated on submit |
+| Daily Challenge — score + XP rewards | ✅ Working | `score = correct×200 + speed_bonus(300 − elapsed_secs)` |
+| Daily Challenge — global leaderboard | ✅ Working | Score tab + Fastest (100% accuracy) tab |
+| HomeScreen DC card with live countdown | ✅ Working | Amber "Not started yet" → Green "Completed · X%" after submission |
 
 ### Prototype — not production-safe
 
@@ -40,10 +49,11 @@ Real-time 1v1 equation-balancing duels over WebSocket.
 | Feature | Notes |
 |---|---|
 | Drill screens (old) | Removed — will be reimplemented as a separate content type |
-| Leaderboard / Streak | DB schema already has `total_xp`, `current_streak`, `catalysts` |
+| Streak system | DB schema has `current_streak`, `catalysts` — no cron job yet |
 | AI hint service | FastAPI scaffold exists in `ai_service/`, not wired |
 | iOS build | Only Android emulator tested |
 | Push notifications | Not started |
+| Registration screen | Users must be inserted directly into DB |
 
 ---
 
@@ -53,18 +63,24 @@ Real-time 1v1 equation-balancing duels over WebSocket.
 chemlingo/
 ├── backend/                  # Go (Gin) — REST + WebSocket
 │   ├── internal/
+│   │   ├── challenge/
+│   │   │   └── challenge.go  # 15-equation pool, ForDate() seeded selection, Validate(), Score(), XPReward()
 │   │   ├── duel/             # Match hub, game loop, WS handlers
 │   │   │   ├── types.go      # MatchState, Equation, Client, Match structs
 │   │   │   ├── equations.go  # 5 seeded equations (easy/medium/hard) — hardcoded for now
 │   │   │   ├── hub.go        # Matchmaking queue, round lifecycle, broadcast
 │   │   │   └── handler.go    # POST /duel/match, GET /ws/duel
-│   │   ├── handler/auth.go   # POST /auth/login (bcrypt + JWT)
+│   │   ├── handler/
+│   │   │   ├── auth.go           # POST /auth/login (bcrypt + JWT)
+│   │   │   ├── profile.go        # GET /api/v1/profile, GET /api/v1/profile/history
+│   │   │   ├── leaderboard.go    # GET /api/v1/leaderboard, GET /api/v1/players/:id/profile
+│   │   │   └── daily_challenge.go # GET/POST /api/v1/daily-challenge, GET /leaderboard
 │   │   ├── middleware/       # JWT middleware
 │   │   ├── model/model.go    # Student struct
-│   │   └── store/store.go    # Postgres queries
+│   │   └── store/store.go    # Postgres queries (profile, history, leaderboard, daily challenge)
 │   ├── cmd/
-│   │   ├── migrate/main.go   # Creates tables (run once — no pgvector needed)
-│   │   └── seed/main.go      # Inserts test@chemlingo.com student
+│   │   ├── migrate/main.go   # Creates tables including daily_challenge_submissions
+│   │   └── seed/main.go      # Inserts test@chemlingo.com + player2@chemlingo.com
 │   ├── config/config.go      # Env var loading
 │   └── main.go               # Route wiring
 │
@@ -83,14 +99,25 @@ chemlingo/
 │       ├── core/
 │       │   ├── api.js           # Axios client (BASE_URL = http://10.0.2.2:8080)
 │       │   ├── duelApi.ts       # createOrJoinMatch, getToken, WS_BASE
-│       │   └── navigation/      # Stack navigator: Login → Duel
+│       │   ├── profileApi.ts    # fetchProfile, fetchHistory, fetchLeaderboard, daily challenge API
+│       │   └── navigation/      # Stack navigator: Login → Home → Duel/Profile/Leaderboard/DailyChallenge
 │       ├── features/
-│       │   └── duel/
-│       │       ├── DuelScreen.tsx
-│       │       └── components/
-│       │           ├── HealthBar.tsx
-│       │           ├── EquationDisplay.tsx
-│       │           └── NumberChips.tsx
+│       │   ├── auth/
+│       │   │   └── LoginScreen.tsx
+│       │   ├── home/
+│       │   │   └── HomeScreen.tsx       # Cards: Daily Challenge (live countdown), Reaction Duel, coming-soon
+│       │   ├── duel/
+│       │   │   ├── DuelScreen.tsx
+│       │   │   └── components/
+│       │   │       ├── HealthBar.tsx
+│       │   │       ├── EquationDisplay.tsx
+│       │   │       └── NumberChips.tsx
+│       │   ├── daily/
+│       │   │   └── DailyChallengeScreen.tsx  # intro → quiz (5 Qs) → results + leaderboard
+│       │   ├── profile/
+│       │   │   └── ProfileScreen.tsx
+│       │   └── leaderboard/
+│       │       └── LeaderboardScreen.tsx
 │       ├── hooks/
 │       │   └── useDuelSocket.ts  # WebSocket lifecycle + state reducer
 │       └── types/
@@ -154,17 +181,15 @@ The DB schema already models the full Duolingo loop (streaks, XP, catalysts, ins
 
 **Backend**
 - [ ] `POST /api/v1/duel/result` — called by hub on `match_end`. Awards XP (winner more), updates streak, handles catalyst (streak freeze) consumption.
-- [ ] `GET /api/v1/profile` — student stats (XP, level, streak, match history).
-- [ ] `GET /api/v1/leaderboard?scope=institute&period=week`
+- [x] `GET /api/v1/profile` — student stats (XP, level, streak, match history).
+- [x] `GET /api/v1/leaderboard` — global leaderboard by XP.
+- [x] **Daily Challenge** — `GET/POST /api/v1/daily-challenge` + `/leaderboard`. 15-equation pool, deterministic date-seeded selection, server-side answer validation, score + XP rewards.
 - [ ] Streak cron job — Redis sorted set, daily job resets broken streaks at midnight.
 
 **App**
-- [ ] **Home screen**
-  - Daily goal progress ring
-  - Streak counter + mascot reaction (happy / at-risk / broken)
-  - "Find Match" CTA
-  - Institute leaderboard preview (top 3)
-- [ ] **Profile screen** — XP, level badge, streak, catalysts, recent match results.
+- [x] **Home screen** — Daily Challenge card (live countdown, completion state), Reaction Duel CTA, coming-soon game cards, Global Leaderboard entry.
+- [x] **Profile screen** — XP, rating, match history.
+- [x] **Daily Challenge screen** — intro (difficulty mix, rewards, countdown) → quiz (5 equations, number pad, elapsed timer) → results (score hero, rank badge, stats, per-question breakdown, leaderboard with Score/Fastest tabs).
 - [ ] **Match end → XP animation → back to Home** (currently the user is stuck after a match).
 - [ ] **Push notifications** via Expo Notifications + FCM
   - "Your streak is at risk!" at 8 PM if no activity that day
@@ -343,8 +368,17 @@ Increase `await asyncio.sleep(3)` in [scripts/play_as_p2.py](scripts/play_as_p2.
 |---|---|---|---|
 | POST | `/api/v1/duel/match` | `{name}` | `{match_id, player_index, status}` |
 | GET | `/ws/duel?match_id=&token=` | — | WebSocket upgrade |
+| GET | `/api/v1/profile` | — | `{name, email, rating, total_xp, current_streak, …}` |
+| GET | `/api/v1/profile/history` | — | `[{opponent, result, xp_earned, played_at}]` |
+| GET | `/api/v1/leaderboard` | — | `[{player_id, name, rating, total_xp, rank}]` |
+| GET | `/api/v1/players/:id/profile` | — | Public profile view |
+| GET | `/api/v1/daily-challenge` | — | `{date, questions, my_submission, secs_to_reset}` |
+| POST | `/api/v1/daily-challenge/submit` | `{answers:[{question_id, coefficients}]}` | `{score, correct_answers, question_results, rewards, rank}` |
+| GET | `/api/v1/daily-challenge/leaderboard` | — | `{entries, my_player_id, my_rank, total_players}` |
 
 > WebSocket uses `?token=` query param — React Native cannot set headers on WebSocket connections.
+
+> `daily-challenge` answers are validated **server-side only** — the client never receives correct coefficients, preventing cheating.
 
 ### WebSocket Protocol
 
@@ -378,7 +412,9 @@ Increase `await asyncio.sleep(3)` in [scripts/play_as_p2.py](scripts/play_as_p2.
 
 ---
 
-## Equation Bank
+## Equation Banks
+
+### Reaction Duel (5 equations — hardcoded, Phase 2 moves to DB)
 
 | ID | Display | Answer | Difficulty |
 |---|---|---|---|
@@ -388,7 +424,27 @@ Increase `await asyncio.sleep(3)` in [scripts/play_as_p2.py](scripts/play_as_p2.
 | `eq_alcl3` | Al + HCl → AlCl₃ + H₂ | [2, 6, 2, 3] | medium |
 | `eq_propane` | C₃H₈ + O₂ → CO₂ + H₂O | [1, 5, 3, 4] | hard |
 
-Add more in [backend/internal/duel/equations.go](backend/internal/duel/equations.go). Phase 2 moves this to a DB table.
+### Daily Challenge pool (15 equations — 5 selected daily via FNV32a date seed)
+
+| ID | Display | Answer | Difficulty |
+|---|---|---|---|
+| `dc_h2o` | H₂ + O₂ → H₂O | [2, 1, 2] | easy |
+| `dc_nh3` | N₂ + H₂ → NH₃ | [1, 3, 2] | easy |
+| `dc_na2o` | Na + O₂ → Na₂O | [4, 1, 2] | easy |
+| `dc_methane` | CH₄ + O₂ → CO₂ + H₂O | [1, 2, 1, 2] | easy |
+| `dc_mgo` | Mg + O₂ → MgO | [2, 1, 2] | easy |
+| `dc_fe2o3` | Fe + O₂ → Fe₂O₃ | [4, 3, 2] | medium |
+| `dc_alcl3` | Al + HCl → AlCl₃ + H₂ | [2, 6, 2, 3] | medium |
+| `dc_ca_h2o` | Ca + H₂O → Ca(OH)₂ + H₂ | [1, 2, 1, 1] | medium |
+| `dc_ethanol` | C₂H₅OH + O₂ → CO₂ + H₂O | [1, 3, 2, 3] | medium |
+| `dc_kclo3` | KClO₃ → KCl + O₂ | [2, 2, 3] | medium |
+| `dc_naoh_h2so4` | NaOH + H₂SO₄ → Na₂SO₄ + H₂O | [2, 1, 1, 2] | medium |
+| `dc_p2o5` | P₄ + O₂ → P₂O₅ | [1, 5, 2] | medium |
+| `dc_propane` | C₃H₈ + O₂ → CO₂ + H₂O | [1, 5, 3, 4] | hard |
+| `dc_fe3o4` | Fe₃O₄ + H₂ → Fe + H₂O | [1, 4, 3, 4] | hard |
+| `dc_acetylene` | C₂H₂ + O₂ → CO₂ + H₂O | [2, 5, 4, 2] | hard |
+
+Add duel equations in [backend/internal/duel/equations.go](backend/internal/duel/equations.go) and daily challenge equations in [backend/internal/challenge/challenge.go](backend/internal/challenge/challenge.go). Phase 2 moves both to a DB table.
 
 ---
 

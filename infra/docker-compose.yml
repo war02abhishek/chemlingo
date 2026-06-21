@@ -24,6 +24,7 @@ services:
     image: redis:7-alpine
     container_name: chemlingo_redis
     restart: unless-stopped
+    command: redis-server --notify-keyspace-events KEx
     ports:
       - "6379:6379"
     volumes:

@@ -11,11 +11,20 @@ import (
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const (
-	RoundDuration = 60 * time.Second
-	BetweenRounds = 3 * time.Second
-	TotalRounds   = 3
-	InitialHP     = 100.0
-	MinDamage     = 5.0
+	BetweenRounds = 0 // no forced pause between rounds — players advance instantly
+	TotalRounds   = 4
+
+	// If a player disconnects and forfeits, add this penalty per unsolved round.
+	ForfeitPenaltyMs = int64(5 * 60 * 1000) // 5 min per round
+
+	keyQueue      = "chemlingo:queue"
+	keyMatch      = "chemlingo:match:"    // + matchID  (HASH)
+	keyConn       = "chemlingo:conn:"     // + matchID:playerID (STRING, SETNX)
+	chanMatch     = "chemlingo:match:"    // + matchID  (Pub/Sub channel)
+
+	matchTTL        = 2 * time.Hour
+	connTTL         = 90 * time.Second
+	reconnectWindow = 30 * time.Second
 )
 
 // ── Domain types ──────────────────────────────────────────────────────────────
@@ -28,16 +37,15 @@ const (
 	StatusFinished MatchStatus = "finished"
 )
 
-// Equation is a single balancing challenge served to both players.
 type Equation struct {
 	ID           string   `json:"id"`
-	Raw          string   `json:"raw"`          // "2 H₂ + O₂ → 2 H₂O"  (canonical form shown on correct)
-	Display      string   `json:"display"`       // "H₂ + O₂ → H₂O"       (shown during the round)
-	Labels       []string `json:"labels"`        // per-slot molecule label
-	SeparatorIdx int      `json:"separator_idx"` // slot index where → is placed
-	Answers      []int    `json:"answers"`       // lowest-integer coefficients
-	Difficulty   string   `json:"difficulty"`    // "easy" | "medium" | "hard"
-	ChipMax      int      `json:"chip_max"`      // highest chip value rendered
+	Raw          string   `json:"raw"`
+	Display      string   `json:"display"`
+	Labels       []string `json:"labels"`
+	SeparatorIdx int      `json:"separator_idx"`
+	Answers      []int    `json:"answers"`
+	Difficulty   string   `json:"difficulty"`
+	ChipMax      int      `json:"chip_max"`
 }
 
 type PlayerInfo struct {
@@ -45,25 +53,26 @@ type PlayerInfo struct {
 	Name     string `json:"name"`
 }
 
+// PlayerProgress is independent per-player state in the race.
 type PlayerProgress struct {
-	PlayerID      string  `json:"player_id"`
-	HP            float64 `json:"hp"`
-	WrongAttempts int     `json:"wrong_attempts"`
-	RoundsSolved  int     `json:"rounds_solved"`
-	Solved        bool    `json:"solved"`
+	PlayerID       string    `json:"player_id"`
+	CurrentRound   int       `json:"current_round"`    // 1-indexed; which equation they're solving
+	RoundStartedAt time.Time `json:"round_started_at"` // when they started the current equation
+	TotalTimeMs    int64     `json:"total_time_ms"`    // cumulative solved time
+	WrongAttempts  int       `json:"wrong_attempts"`   // for the current equation
+	RoundsSolved   int       `json:"rounds_solved"`    // how many equations completed
+	Finished       bool      `json:"finished"`         // true when all equations solved
 }
 
+// MatchState is stored in Redis and broadcast to both players.
 type MatchState struct {
-	MatchID       string            `json:"match_id"`
-	Status        MatchStatus       `json:"status"`
-	Players       [2]PlayerInfo     `json:"players"`
-	CurrentRound  int               `json:"current_round"`
-	TotalRounds   int               `json:"total_rounds"`
-	Equation      Equation          `json:"equation"`
-	RoundStartsAt time.Time         `json:"round_starts_at"`
-	RoundEndsAt   time.Time         `json:"round_ends_at"`
-	Progress      [2]PlayerProgress `json:"progress"`
-	Winner        string            `json:"winner,omitempty"`
+	MatchID     string            `json:"match_id"`
+	Status      MatchStatus       `json:"status"`
+	Players     [2]PlayerInfo     `json:"players"`
+	TotalRounds int               `json:"total_rounds"`
+	Equations   []Equation        `json:"equations"` // same set for both players, picked at match start
+	Progress    [2]PlayerProgress `json:"progress"`
+	Winner      string            `json:"winner,omitempty"`
 }
 
 // ── WS message envelopes ──────────────────────────────────────────────────────
@@ -78,50 +87,42 @@ type OutgoingMsg struct {
 	Payload interface{} `json:"payload"`
 }
 
-// ── Typed payload structs ──────────────────────────────────────────────────────
+// ── Typed payload structs ─────────────────────────────────────────────────────
 
 type SubmitPayload struct {
 	Coefficients []int `json:"coefficients"`
 }
 
 type ValidationResult struct {
-	Correct       bool    `json:"correct"`
-	Damage        float64 `json:"damage,omitempty"`
-	WrongAttempts int     `json:"wrong_attempts"`
+	Correct       bool  `json:"correct"`
+	SolveTimeMs   int64 `json:"solve_time_ms,omitempty"`
+	WrongAttempts int   `json:"wrong_attempts"`
 }
 
-type RoundEndPayload struct {
-	WinnerID    string  `json:"winner_id"`
-	NextRoundIn float64 `json:"next_round_in"`
+// RatingChange carries per-player Elo movement included in the match_end payload.
+type RatingChange struct {
+	PlayerID string `json:"player_id"`
+	Before   int    `json:"before"`
+	Delta    int    `json:"delta"` // negative on loss
+	After    int    `json:"after"`
 }
 
 type MatchEndPayload struct {
-	WinnerID   string     `json:"winner_id"`
-	FinalState MatchState `json:"final_state"`
+	WinnerID      string         `json:"winner_id"` // "" = tie
+	FinalState    MatchState     `json:"final_state"`
+	RatingChanges [2]RatingChange `json:"rating_changes"`
 }
 
-// ── Internal runtime types ────────────────────────────────────────────────────
+// ── Client — owns one WebSocket connection ────────────────────────────────────
 
-// Client owns a single player's WebSocket connection and outbound write queue.
 type Client struct {
 	conn     *websocket.Conn
 	playerID string
-	send     chan []byte // buffered; writePump drains this
+	matchID  string
+	send     chan []byte
+	once     sync.Once
 }
 
-// Match holds all mutable state for one live game.
-type Match struct {
-	id           string
-	state        MatchState
-	clients      [2]*Client
-	connectedCnt int // incremented on each WS attachment; starts round at 2
-	mu           sync.Mutex
-	roundEnded   bool // idempotency guard per round
-	done         chan struct{}
-	closeOnce    sync.Once
-}
-
-// finish closes m.done exactly once.
-func (m *Match) finish() {
-	m.closeOnce.Do(func() { close(m.done) })
+func (c *Client) close() {
+	c.once.Do(func() { close(c.send) })
 }
