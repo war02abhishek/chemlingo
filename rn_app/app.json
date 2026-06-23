@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "ChemLingo",
-    "slug": "chemlingo",
+    "name": "Flasky",
+    "slug": "flasky",
     "version": "1.0.0",
     "orientation": "portrait",
     "platforms": ["ios", "android", "web"],

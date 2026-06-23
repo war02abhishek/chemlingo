@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -243,7 +243,7 @@ const hr = StyleSheet.create({
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
-export default function ProfileScreen({ navigation, route }: { navigation: any; route: any }) {
+export default function ProfileScreen({ navigation, route, onLogout }: { navigation: any; route: any; onLogout?: () => void }) {
   const viewingPlayerId = route?.params?.playerId as string | undefined;
   const isSelf = !viewingPlayerId;
 
@@ -253,7 +253,8 @@ export default function ProfileScreen({ navigation, route }: { navigation: any; 
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     if (isSelf) {
       Promise.all([fetchProfile(), fetchHistory()])
         .then(([p, h]) => { setProfile(p); setHistory(h); })
@@ -269,7 +270,10 @@ export default function ProfileScreen({ navigation, route }: { navigation: any; 
         .catch((e: Error) => setError(e.message))
         .finally(() => setLoading(false));
     }
-  }, [viewingPlayerId]);
+  }, [isSelf, viewingPlayerId]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { return navigation.addListener('focus', load); }, [navigation, load]);
 
   const winRate = profile && (profile.wins + profile.losses) > 0
     ? Math.round((profile.wins / (profile.wins + profile.losses)) * 100)
@@ -330,6 +334,15 @@ export default function ProfileScreen({ navigation, route }: { navigation: any; 
           </View>
 
           <View style={{ height: 32 }} />
+
+          {/* Logout */}
+          {isSelf && onLogout && (
+            <TouchableOpacity style={s.logoutBtn} onPress={onLogout} activeOpacity={0.8}>
+              <Text style={s.logoutText}>Log Out</Text>
+            </TouchableOpacity>
+          )}
+
+          <View style={{ height: 32 }} />
         </ScrollView>
       ) : null}
     </SafeAreaView>
@@ -371,4 +384,10 @@ const s = StyleSheet.create({
   historyCard:  { backgroundColor: '#0F172A', paddingHorizontal: 4 },
   empty:        { textAlign: 'center', color: '#475569', paddingVertical: 24, fontSize: 14 },
   errorText:    { color: '#EF4444', fontSize: 15 },
+  logoutBtn: {
+    marginTop: 8, marginHorizontal: 4,
+    backgroundColor: '#1E293B', borderWidth: 1.5, borderColor: '#EF444440',
+    borderRadius: 14, padding: 15, alignItems: 'center',
+  },
+  logoutText: { fontSize: 15, fontWeight: '700', color: '#EF4444' },
 });

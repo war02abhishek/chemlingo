@@ -469,6 +469,7 @@ export default function DailyChallengeScreen({ navigation, route }: { navigation
   // ── QUIZ phase
   if (phase === 'quiz') {
     const q = questions[currentQ];
+    if (!q) return null;
     const progress = (currentQ / questions.length) * 100;
     const elapsedStr = fmtMs(elapsed);
 

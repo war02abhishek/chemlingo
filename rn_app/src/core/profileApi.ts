@@ -1,14 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:8080';
-
-const http = axios.create({ baseURL: BASE_URL });
-http.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('jwt');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+import { http } from './api';
 
 // ── Tier system ───────────────────────────────────────────────────────────────
 
@@ -106,6 +96,10 @@ export interface Profile {
   losses: number;
   rank: string;
   rank_emoji: string;
+  total_xp: number;
+  current_streak: number;
+  coins: number;
+  hearts: number;
 }
 
 export interface DuelResultEntry {

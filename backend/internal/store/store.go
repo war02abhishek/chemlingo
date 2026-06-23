@@ -52,7 +52,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err := s.MigrateSprint(ctx); err != nil {
 		return err
 	}
-	return s.MigrateCompound(ctx)
+	if err := s.MigrateCompound(ctx); err != nil {
+		return err
+	}
+	if err := s.MigrateStudentExtensions(ctx); err != nil {
+		return err
+	}
+	if err := s.MigrateCurriculum(ctx); err != nil {
+		return err
+	}
+	return s.MigrateTeacher(ctx)
 }
 
 // GetLeaderboard returns the top-N players ordered by rating, plus total player count.
@@ -121,12 +130,14 @@ func (s *Store) GetStudentByEmail(ctx context.Context, email string) (*model.Stu
 	err := s.db.QueryRow(ctx, `
 		SELECT id, institute_id, email, full_name, batch,
 		       current_streak, max_streak, catalysts, total_xp, last_active_at,
-		       rating, wins, losses
+		       rating, wins, losses,
+		       COALESCE(role, 'student'), COALESCE(coins, 0), COALESCE(hearts, 3)
 		FROM students WHERE email = $1
 	`, email).Scan(
 		&st.ID, &st.InstituteID, &st.Email, &st.FullName, &st.Batch,
 		&st.CurrentStreak, &st.MaxStreak, &st.Catalysts, &st.TotalXP, &st.LastActiveAt,
 		&st.Rating, &st.Wins, &st.Losses,
+		&st.Role, &st.Coins, &st.Hearts,
 	)
 	if err != nil {
 		return nil, err
@@ -220,14 +231,19 @@ func (s *Store) RecordMatchResult(ctx context.Context, r model.MatchResultRecord
 	return tx.Commit(ctx)
 }
 
-// GetProfile returns a player's public profile.
+// GetProfile returns a player's full profile.
 func (s *Store) GetProfile(ctx context.Context, playerID uuid.UUID) (*model.Profile, error) {
 	var p model.Profile
 	var id uuid.UUID
-	err := s.db.QueryRow(ctx,
-		"SELECT id, full_name, email, rating, wins, losses FROM students WHERE id = $1",
-		playerID,
-	).Scan(&id, &p.Name, &p.Email, &p.Rating, &p.Wins, &p.Losses)
+	err := s.db.QueryRow(ctx, `
+		SELECT id, full_name, email, rating, wins, losses,
+		       COALESCE(total_xp, 0), COALESCE(current_streak, 0),
+		       COALESCE(coins, 0), COALESCE(hearts, 3)
+		FROM students WHERE id = $1
+	`, playerID).Scan(
+		&id, &p.Name, &p.Email, &p.Rating, &p.Wins, &p.Losses,
+		&p.TotalXP, &p.CurrentStreak, &p.Coins, &p.Hearts,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -672,6 +688,412 @@ func (s *Store) GetCompoundPersonalBest(ctx context.Context, playerID uuid.UUID)
 		playerID,
 	).Scan(&best)
 	return best, err
+}
+
+// ── Student extensions ────────────────────────────────────────────────────────
+
+// MigrateStudentExtensions adds Flasky v1 columns to the students table.
+func (s *Store) MigrateStudentExtensions(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		ALTER TABLE students
+		  ADD COLUMN IF NOT EXISTS coins              INT         NOT NULL DEFAULT 0,
+		  ADD COLUMN IF NOT EXISTS hearts             INT         NOT NULL DEFAULT 3,
+		  ADD COLUMN IF NOT EXISTS hearts_last_refill TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		  ADD COLUMN IF NOT EXISTS role               TEXT        NOT NULL DEFAULT 'student',
+		  ADD COLUMN IF NOT EXISTS batch_id           UUID;
+	`)
+	return err
+}
+
+// AwardCoins atomically adds coins to a student's balance.
+func (s *Store) AwardCoins(ctx context.Context, playerID uuid.UUID, amount int) error {
+	_, err := s.db.Exec(ctx,
+		"UPDATE students SET coins = coins + $1 WHERE id = $2",
+		amount, playerID,
+	)
+	return err
+}
+
+// ── Curriculum ────────────────────────────────────────────────────────────────
+
+// MigrateCurriculum creates topic, lesson, lesson_completion, and topic_progress tables.
+func (s *Store) MigrateCurriculum(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS topics (
+		    id            UUID    PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    slug          TEXT    UNIQUE NOT NULL,
+		    title         TEXT    NOT NULL,
+		    icon          TEXT,
+		    position      INT     NOT NULL,
+		    total_lessons INT     NOT NULL DEFAULT 5
+		);
+
+		CREATE TABLE IF NOT EXISTS lessons (
+		    id           UUID    PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    topic_id     UUID    NOT NULL REFERENCES topics(id),
+		    slug         TEXT    UNIQUE NOT NULL,
+		    title        TEXT    NOT NULL,
+		    position     INT     NOT NULL,
+		    game_mode    TEXT    NOT NULL,
+		    concept_text TEXT,
+		    xp_reward    INT     NOT NULL DEFAULT 50,
+		    coin_reward  INT     NOT NULL DEFAULT 10
+		);
+
+		CREATE TABLE IF NOT EXISTS lesson_completions (
+		    id           UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    player_id    UUID        NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+		    lesson_id    UUID        NOT NULL REFERENCES lessons(id),
+		    score        INT,
+		    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    UNIQUE(player_id, lesson_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS topic_progress (
+		    player_id          UUID    NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+		    topic_id           UUID    NOT NULL REFERENCES topics(id),
+		    lessons_completed  INT     NOT NULL DEFAULT 0,
+		    boss_defeated      BOOLEAN NOT NULL DEFAULT FALSE,
+		    PRIMARY KEY (player_id, topic_id)
+		);
+	`)
+	return err
+}
+
+// UpsertTopic inserts or updates a topic by slug.
+func (s *Store) UpsertTopic(ctx context.Context, slug, title, icon string, position, totalLessons int) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO topics (slug, title, icon, position, total_lessons)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (slug) DO UPDATE
+		  SET title = EXCLUDED.title, icon = EXCLUDED.icon,
+		      position = EXCLUDED.position, total_lessons = EXCLUDED.total_lessons
+	`, slug, title, icon, position, totalLessons)
+	return err
+}
+
+// UpsertLesson inserts or updates a lesson by slug (topic must exist first).
+func (s *Store) UpsertLesson(ctx context.Context, topicSlug, slug, title string, position int, gameMode, conceptText string, xpReward, coinReward int) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO lessons (topic_id, slug, title, position, game_mode, concept_text, xp_reward, coin_reward)
+		SELECT t.id, $2, $3, $4, $5, $6, $7, $8 FROM topics t WHERE t.slug = $1
+		ON CONFLICT (slug) DO UPDATE
+		  SET title = EXCLUDED.title, position = EXCLUDED.position,
+		      game_mode = EXCLUDED.game_mode, concept_text = EXCLUDED.concept_text,
+		      xp_reward = EXCLUDED.xp_reward, coin_reward = EXCLUDED.coin_reward
+	`, topicSlug, slug, title, position, gameMode, conceptText, xpReward, coinReward)
+	return err
+}
+
+// GetTopicsWithProgress returns all topics with per-student progress data.
+func (s *Store) GetTopicsWithProgress(ctx context.Context, playerID uuid.UUID) ([]model.TopicWithProgress, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT t.id, t.slug, t.title, t.icon, t.position, t.total_lessons,
+		       COALESCE(tp.lessons_completed, 0),
+		       COALESCE(tp.boss_defeated, FALSE)
+		FROM topics t
+		LEFT JOIN topic_progress tp ON tp.topic_id = t.id AND tp.player_id = $1
+		ORDER BY t.position
+	`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.TopicWithProgress
+	for rows.Next() {
+		var tw model.TopicWithProgress
+		var id uuid.UUID
+		if err := rows.Scan(&id, &tw.Slug, &tw.Title, &tw.Icon, &tw.Position, &tw.TotalLessons,
+			&tw.LessonsCompleted, &tw.BossDefeated); err != nil {
+			return nil, err
+		}
+		tw.ID = id.String()
+		results = append(results, tw)
+	}
+	return results, nil
+}
+
+// GetLessonsForTopic returns all lessons for a topic with completion status for a student.
+func (s *Store) GetLessonsForTopic(ctx context.Context, topicSlug string, playerID uuid.UUID) ([]model.LessonWithStatus, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT l.id, l.slug, l.title, l.position, l.game_mode, l.concept_text, l.xp_reward, l.coin_reward,
+		       (lc.id IS NOT NULL) AS completed, COALESCE(lc.score, 0)
+		FROM lessons l
+		JOIN topics t ON t.id = l.topic_id
+		LEFT JOIN lesson_completions lc ON lc.lesson_id = l.id AND lc.player_id = $2
+		WHERE t.slug = $1
+		ORDER BY l.position
+	`, topicSlug, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.LessonWithStatus
+	for rows.Next() {
+		var ls model.LessonWithStatus
+		var id uuid.UUID
+		if err := rows.Scan(&id, &ls.Slug, &ls.Title, &ls.Position, &ls.GameMode,
+			&ls.ConceptText, &ls.XPReward, &ls.CoinReward, &ls.Completed, &ls.Score); err != nil {
+			return nil, err
+		}
+		ls.ID = id.String()
+		results = append(results, ls)
+	}
+	return results, nil
+}
+
+// GetLessonByID returns a single lesson's metadata (xp/coin rewards) by UUID string.
+func (s *Store) GetLessonByID(ctx context.Context, lessonID string) (*model.LessonWithStatus, error) {
+	lid, err := uuid.Parse(lessonID)
+	if err != nil {
+		return nil, err
+	}
+	var ls model.LessonWithStatus
+	var id uuid.UUID
+	err = s.db.QueryRow(ctx, `
+		SELECT id, slug, title, position, game_mode, COALESCE(concept_text,''), xp_reward, coin_reward
+		FROM lessons WHERE id = $1
+	`, lid).Scan(&id, &ls.Slug, &ls.Title, &ls.Position, &ls.GameMode, &ls.ConceptText, &ls.XPReward, &ls.CoinReward)
+	if err != nil {
+		return nil, err
+	}
+	ls.ID = id.String()
+	return &ls, nil
+}
+
+// SaveLessonCompletion records a lesson completion, awards XP + coins, and updates topic_progress.
+func (s *Store) SaveLessonCompletion(ctx context.Context, playerID uuid.UUID, lessonID string, score, xpReward, coinReward int) error {
+	lid, err := uuid.Parse(lessonID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO lesson_completions (player_id, lesson_id, score)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (player_id, lesson_id) DO NOTHING
+	`, playerID, lid, score)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE students SET total_xp = total_xp + $1, coins = coins + $2 WHERE id = $3
+	`, xpReward, coinReward, playerID)
+	if err != nil {
+		return err
+	}
+
+	// Upsert topic_progress (increment lessons_completed if this is a new completion)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO topic_progress (player_id, topic_id, lessons_completed)
+		SELECT $1, l.topic_id, 1 FROM lessons l WHERE l.id = $2
+		ON CONFLICT (player_id, topic_id) DO UPDATE
+		  SET lessons_completed = topic_progress.lessons_completed + 1
+	`, playerID, lid)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ── Teacher / Batch ───────────────────────────────────────────────────────────
+
+// MigrateTeacher creates batch, batch_students, and boss_battle_submissions tables.
+func (s *Store) MigrateTeacher(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS batches (
+		    id               UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    name             TEXT        NOT NULL,
+		    teacher_id       UUID        NOT NULL REFERENCES students(id),
+		    current_topic_id UUID        REFERENCES topics(id),
+		    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS batch_students (
+		    batch_id   UUID NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+		    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+		    joined_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    PRIMARY KEY (batch_id, student_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS boss_battle_submissions (
+		    id           UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    player_id    UUID        NOT NULL REFERENCES students(id),
+		    topic_id     UUID        NOT NULL REFERENCES topics(id),
+		    score        INT         NOT NULL DEFAULT 0,
+		    passed       BOOLEAN     NOT NULL DEFAULT FALSE,
+		    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    UNIQUE(player_id, topic_id)
+		);
+	`)
+	return err
+}
+
+// ── Teacher queries ────────────────────────────────────────────────────────
+
+type TeacherOverview struct {
+	ActiveStudents  int     `json:"active_students"`
+	AvgStreak       float64 `json:"avg_streak"`
+	LessonsThisWeek int     `json:"lessons_this_week"`
+	AtRiskCount     int     `json:"at_risk_count"`
+}
+
+// GetTeacherOverview returns KPIs for the teacher's own batches.
+func (s *Store) GetTeacherOverview(ctx context.Context, teacherID uuid.UUID) (TeacherOverview, error) {
+	var ov TeacherOverview
+
+	// Active students = joined teacher's batches and logged in within 7 days
+	_ = s.db.QueryRow(ctx, `
+		SELECT
+		    COUNT(DISTINCT bs.student_id)                    AS active_students,
+		    COALESCE(AVG(st.current_streak), 0)              AS avg_streak,
+		    (
+		        SELECT COUNT(*) FROM lesson_completions lc
+		        JOIN batch_students bss ON bss.student_id = lc.player_id
+		        JOIN batches b ON b.id = bss.batch_id
+		        WHERE b.teacher_id = $1
+		          AND lc.completed_at >= NOW() - INTERVAL '7 days'
+		    )                                                 AS lessons_this_week,
+		    SUM(CASE WHEN st.last_active_at < NOW() - INTERVAL '3 days' THEN 1 ELSE 0 END) AS at_risk
+		FROM batch_students bs
+		JOIN batches b    ON b.id = bs.batch_id AND b.teacher_id = $1
+		JOIN students st  ON st.id = bs.student_id
+	`, teacherID).Scan(&ov.ActiveStudents, &ov.AvgStreak, &ov.LessonsThisWeek, &ov.AtRiskCount)
+
+	return ov, nil
+}
+
+type StudentRow struct {
+	ID            string  `json:"id"`
+	FullName      string  `json:"full_name"`
+	Email         string  `json:"email"`
+	CurrentStreak int     `json:"current_streak"`
+	TotalXP       int     `json:"total_xp"`
+	LessonsWeek   int     `json:"lessons_this_week"`
+	LastActive    *string `json:"last_active"`
+}
+
+func (s *Store) GetBatchStudents(ctx context.Context, teacherID uuid.UUID, batchID string) ([]StudentRow, error) {
+	q := `
+		SELECT st.id, st.full_name, st.email,
+		       st.current_streak, st.total_xp,
+		       COUNT(lc.id) FILTER (WHERE lc.completed_at >= NOW() - INTERVAL '7 days') AS lessons_week,
+		       MAX(lc.completed_at)::TEXT AS last_active
+		FROM students st
+		JOIN batch_students bs ON bs.student_id = st.id
+		JOIN batches b         ON b.id = bs.batch_id AND b.teacher_id = $1
+		LEFT JOIN lesson_completions lc ON lc.player_id = st.id
+	`
+	args := []any{teacherID}
+	if batchID != "" {
+		q += ` WHERE bs.batch_id = $2`
+		args = append(args, batchID)
+	}
+	q += ` GROUP BY st.id ORDER BY st.full_name`
+
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var students []StudentRow
+	for rows.Next() {
+		var r StudentRow
+		if err := rows.Scan(&r.ID, &r.FullName, &r.Email, &r.CurrentStreak, &r.TotalXP, &r.LessonsWeek, &r.LastActive); err != nil {
+			continue
+		}
+		students = append(students, r)
+	}
+	return students, nil
+}
+
+type WeakLesson struct {
+	LessonTitle string  `json:"lesson_title"`
+	TopicTitle  string  `json:"topic_title"`
+	AvgScore    float64 `json:"avg_score"`
+	Struggling  int     `json:"struggling_count"`
+}
+
+func (s *Store) GetWeakLessons(ctx context.Context, teacherID uuid.UUID) ([]WeakLesson, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT l.title, t.title, COALESCE(AVG(lc.score), 0) AS avg_score,
+		       COUNT(lc.id) FILTER (WHERE lc.score < 60) AS struggling
+		FROM lesson_completions lc
+		JOIN lessons l ON l.id = lc.lesson_id
+		JOIN topics  t ON t.id = l.topic_id
+		JOIN batch_students bs ON bs.student_id = lc.player_id
+		JOIN batches b ON b.id = bs.batch_id AND b.teacher_id = $1
+		GROUP BY l.id, l.title, t.title
+		HAVING AVG(lc.score) < 70
+		ORDER BY avg_score ASC
+		LIMIT 10
+	`, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []WeakLesson
+	for rows.Next() {
+		var w WeakLesson
+		if err := rows.Scan(&w.LessonTitle, &w.TopicTitle, &w.AvgScore, &w.Struggling); err != nil {
+			continue
+		}
+		result = append(result, w)
+	}
+	return result, nil
+}
+
+type BatchRow struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	StudentCount   int    `json:"student_count"`
+	CurrentTopicID string `json:"current_topic_id"`
+}
+
+func (s *Store) GetTeacherBatches(ctx context.Context, teacherID uuid.UUID) ([]BatchRow, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT b.id, b.name,
+		       COUNT(bs.student_id) AS student_count,
+		       COALESCE(b.current_topic_id::TEXT, '') AS current_topic_id
+		FROM batches b
+		LEFT JOIN batch_students bs ON bs.batch_id = b.id
+		WHERE b.teacher_id = $1
+		GROUP BY b.id
+		ORDER BY b.created_at
+	`, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var batches []BatchRow
+	for rows.Next() {
+		var br BatchRow
+		if err := rows.Scan(&br.ID, &br.Name, &br.StudentCount, &br.CurrentTopicID); err != nil {
+			continue
+		}
+		batches = append(batches, br)
+	}
+	return batches, nil
+}
+
+func (s *Store) CreateBatch(ctx context.Context, teacherID uuid.UUID, name string) (string, error) {
+	var id string
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO batches (name, teacher_id) VALUES ($1, $2) RETURNING id::TEXT
+	`, name, teacherID).Scan(&id)
+	return id, err
 }
 
 func deltaWL(result string) (wins, losses int) {

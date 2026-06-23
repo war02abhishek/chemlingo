@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/chemlingo/backend/config"
+	"github.com/chemlingo/backend/internal/curriculum"
 	"github.com/chemlingo/backend/internal/duel"
 	"github.com/chemlingo/backend/internal/handler"
 	"github.com/chemlingo/backend/internal/middleware"
@@ -42,6 +43,9 @@ func main() {
 	if err := s.Migrate(context.Background()); err != nil {
 		log.Fatalf("migration: %v", err)
 	}
+	if err := curriculum.SeedTopics(context.Background(), s); err != nil {
+		log.Fatalf("curriculum seed: %v", err)
+	}
 
 	authHandler := handler.NewAuthHandler(s, cfg.JWTSecret)
 	profileHandler := handler.NewProfileHandler(s)
@@ -49,6 +53,9 @@ func main() {
 	dailyChallengeHandler := handler.NewDailyChallengeHandler(s)
 	sprintHandler := handler.NewSprintHandler(s)
 	compoundHandler := handler.NewCompoundHandler(s)
+	curriculumHandler := handler.NewCurriculumHandler(s)
+	predictorHandler := handler.NewPredictorHandler(s)
+	teacherHandler := handler.NewTeacherHandler(s)
 	duelHub := duel.NewHub(rdb, duel.LoadEquations(), cfg.JWTSecret, s)
 
 	// ── Routes ────────────────────────────────────────────────────────────────
@@ -80,6 +87,23 @@ func main() {
 		api.GET("/compound/daily/leaderboard", compoundHandler.GetLeaderboard)
 		api.GET("/compound/practice", compoundHandler.GetPractice)
 		api.POST("/compound/practice/check", compoundHandler.CheckPractice)
+
+		// Curriculum
+		api.GET("/curriculum", curriculumHandler.GetCurriculum)
+		api.GET("/curriculum/progress", curriculumHandler.GetProgress)
+		api.POST("/lessons/:id/complete", curriculumHandler.CompleteLesson)
+
+		// Reaction Predictor
+		api.GET("/predictor/lesson/:lesson_id", predictorHandler.GetLessonQuestions)
+		api.POST("/predictor/lesson/:lesson_id/submit", predictorHandler.SubmitLesson)
+		api.GET("/predictor/practice", predictorHandler.GetPracticeQuestion)
+
+		// Teacher
+		api.GET("/teacher/overview", teacherHandler.GetOverview)
+		api.GET("/teacher/students", teacherHandler.GetStudents)
+		api.GET("/teacher/insights", teacherHandler.GetInsights)
+		api.GET("/teacher/batches", teacherHandler.GetBatches)
+		api.POST("/teacher/batches", teacherHandler.CreateBatch)
 	}
 
 	log.Printf("ChemLingo backend running on :%s", cfg.Port)

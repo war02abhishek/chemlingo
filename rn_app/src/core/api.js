@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:8080';
 
-const http = axios.create({ baseURL: BASE_URL });
+export const http = axios.create({ baseURL: BASE_URL });
 
 http.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('jwt');
@@ -14,6 +14,8 @@ http.interceptors.request.use(async (config) => {
 export async function login(email, password) {
   const { data } = await http.post('/auth/login', { email, password });
   await AsyncStorage.setItem('jwt', data.token);
+  const role = data.student?.role ?? data.role ?? 'student';
+  await AsyncStorage.setItem('role', role);
   return data;
 }
 

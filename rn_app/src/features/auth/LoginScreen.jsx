@@ -15,8 +15,9 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
     setLoading(true);
     setError(null);
     try {
-      await login(email.trim(), password);
-      onLoginSuccess?.();
+      const data = await login(email.trim(), password);
+      const role = data.student?.role ?? data.role ?? 'student';
+      onLoginSuccess?.(role);
     } catch {
       setError('Invalid credentials');
     } finally {
@@ -27,8 +28,8 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
-        <Text style={s.title}>ChemLingo</Text>
-        <Text style={s.subtitle}>Master Inorganic Chemistry</Text>
+        <Text style={s.title}>🧪 Flasky</Text>
+        <Text style={s.subtitle}>Learn · Practice · Compete</Text>
 
         <TextInput
           style={s.input}
@@ -67,7 +68,7 @@ const s = StyleSheet.create({
   },
   error: { color: 'red', marginBottom: 8 },
   btn: {
-    backgroundColor: '#6366F1', borderRadius: 10,
+    backgroundColor: '#2fc665', borderRadius: 10,
     padding: 16, alignItems: 'center', marginTop: 8,
   },
   btnText: { color: '#fff', fontWeight: '600', fontSize: 16 },

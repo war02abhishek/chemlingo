@@ -1,8 +1,8 @@
 # ChemLingo
 
-Duolingo-style micro-learning platform for 12th Grade Inorganic Chemistry (JEE/NEET).
-Real-time 1v1 equation-balancing duels over WebSocket.
+Chemlingo is a gamified chemistry practice platform that keeps students revising every day and gives coaching institutes visibility into who is practicing, who is struggling, and which concepts need reinforcement.
 
+Teacher teaches → Student practices daily through games → Teacher monitors completion and weak concepts → Student maintains streak and progresses through curriculum.
 ---
 
 ## What We Have vs What's a Prototype

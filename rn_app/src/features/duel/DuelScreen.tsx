@@ -481,7 +481,7 @@ export default function DuelScreen({ navigation }: { navigation: any }) {
               <Text style={s.homeBtnText}>⬆ Claim Rank</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={s.homeBtn} onPress={() => navigation.navigate('Home')}>
+            <TouchableOpacity style={s.homeBtn} onPress={() => navigation.navigate('CompeteHome')}>
               <Text style={s.homeBtnText}>Continue</Text>
             </TouchableOpacity>
           )}
@@ -497,7 +497,7 @@ export default function DuelScreen({ navigation }: { navigation: any }) {
           newTier={rankUpData.after}
           onContinue={() => {
             setShowRankUp(false);
-            navigation.navigate('Home');
+            navigation.navigate('CompeteHome');
           }}
         />
       )}
