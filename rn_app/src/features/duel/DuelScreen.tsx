@@ -18,6 +18,7 @@ import Animated, {
 import { createOrJoinMatch } from '../../core/duelApi';
 import { getTier, getTierIndex } from '../../core/profileApi';
 import { useDuelSocket } from '../../hooks/useDuelSocket';
+import CelebrationOverlay from '../../core/components/CelebrationOverlay';
 import RankUpModal from '../rank/RankUpModal';
 import {
   EquationDisplay,
@@ -170,8 +171,9 @@ export default function DuelScreen({ navigation }: { navigation: any }) {
   // Which equation index we are displaying locally (0-indexed)
   const [equationIdx, setEquationIdx] = useState(0);
 
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [showRankUp, setShowRankUp]     = useState(false);
+  const [showConfetti, setShowConfetti]         = useState(false);
+  const [showWinCelebration, setShowWinCelebration] = useState(false);
+  const [showRankUp, setShowRankUp]             = useState(false);
 
   const eqRef = useRef<EquationDisplayRef>(null);
   const overlayOpacity = useSharedValue(0);
@@ -226,6 +228,7 @@ export default function DuelScreen({ navigation }: { navigation: any }) {
     if (isWinner) {
       setTimeout(() => setShowConfetti(true), 350);
       setTimeout(() => setShowConfetti(false), 1600);
+      setTimeout(() => setShowWinCelebration(true), 500);
     }
   }, [phase, matchEnd]);
 
@@ -407,6 +410,14 @@ export default function DuelScreen({ navigation }: { navigation: any }) {
           </View>
         )
       )}
+
+      {/* ── Win celebration ──────────────────────────────────────────────── */}
+      <CelebrationOverlay
+        type="duel_win"
+        visible={showWinCelebration}
+        onDone={() => setShowWinCelebration(false)}
+        duration={2600}
+      />
 
       {/* ── Match-end overlay ─────────────────────────────────────────────── */}
       {phase === 'finished' && matchEnd && (

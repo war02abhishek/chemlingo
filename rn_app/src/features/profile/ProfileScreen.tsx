@@ -283,9 +283,13 @@ export default function ProfileScreen({ navigation, route, onLogout }: { navigat
     <SafeAreaView style={s.safe}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backText}>← Back</Text>
-        </TouchableOpacity>
+        {navigation.canGoBack() ? (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
+            <Text style={s.backText}>← Back</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 60 }} />
+        )}
         <Text style={s.headerTitle}>{isSelf ? 'Profile' : (profile?.name ?? 'Player')}</Text>
         <View style={{ width: 60 }} />
       </View>
@@ -302,6 +306,11 @@ export default function ProfileScreen({ navigation, route, onLogout }: { navigat
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{profile.name}</Text>
               {isSelf && <Text style={s.email}>{profile.email}</Text>}
+              {isSelf && (
+                <View style={s.batchBadge}>
+                  <Text style={s.batchBadgeText}>{profile.batch_name ? `🎓 ${profile.batch_name}` : '📚 Free Study'}</Text>
+                </View>
+              )}
             </View>
             {globalRank !== null && (
               <View style={s.globalRankBadge}>
@@ -369,6 +378,8 @@ const s = StyleSheet.create({
   identityRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20, gap: 12 },
   name:  { fontSize: 24, fontWeight: '800', color: '#F8FAFC', marginBottom: 2 },
   email: { fontSize: 13, color: '#475569' },
+  batchBadge: { alignSelf: 'flex-start', backgroundColor: '#1E293B', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3, marginTop: 6 },
+  batchBadgeText: { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
   globalRankBadge: {
     backgroundColor: '#1E293B', borderRadius: 12,
     borderWidth: 1.5, borderColor: '#6366F160',

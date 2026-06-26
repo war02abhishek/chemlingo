@@ -3,12 +3,14 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   SafeAreaView, RefreshControl, ActivityIndicator, Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { fetchProfile, Profile } from '../../core/profileApi';
 import { fetchCurriculum, fetchTopicLessons, TopicWithProgress, LessonWithStatus } from '../../core/curriculumApi';
 import FlaskyMascot from '../../core/components/FlaskyMascot';
-import { Colors, Font, Radius, Shadow3D, xpToLevel, xpProgressInLevel } from '../../core/theme';
+import CelebrationOverlay from '../../core/components/CelebrationOverlay';
+import { Colors, Font, Radius, Shadow3D, xpToLevel, xpProgressInLevel, levelName } from '../../core/theme';
 
 // ── Inline SVG icons ────────────────────────────────────────────────────────
 function FlameIcon({ size = 18 }: { size?: number }) {
@@ -100,11 +102,26 @@ export default function DashboardScreen({ navigation }: any) {
   const [nextLesson, setNextLesson] = useState<{ topic: TopicWithProgress; lesson: LessonWithStatus } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [showStreakCelebration, setShowStreakCelebration] = useState(false);
+
+  const checkStreakIncrease = useCallback(async (newStreak: number) => {
+    if (newStreak <= 0) return;
+    const key = `last_seen_streak`;
+    const stored = await AsyncStorage.getItem(key);
+    const lastSeen = stored ? parseInt(stored, 10) : 0;
+    if (newStreak > lastSeen) {
+      await AsyncStorage.setItem(key, String(newStreak));
+      setShowStreakCelebration(true);
+    }
+  }, []);
 
   const load = useCallback(async () => {
+    setLoadError(false);
     try {
       const [prof, curr] = await Promise.all([fetchProfile(), fetchCurriculum()]);
       setProfile(prof);
+      checkStreakIncrease(prof.current_streak);
 
       for (const topic of curr.topics) {
         if (topic.lessons_completed < topic.total_lessons) {
@@ -117,7 +134,7 @@ export default function DashboardScreen({ navigation }: any) {
         }
       }
     } catch {
-      // empty state shown
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -135,6 +152,20 @@ export default function DashboardScreen({ navigation }: any) {
     );
   }
 
+  if (loadError) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.center}>
+          <Text style={{ fontFamily: Font.display, fontSize: 18, color: Colors.ink, marginBottom: 8 }}>Couldn't load your data</Text>
+          <Text style={{ fontFamily: Font.body, fontSize: 14, color: Colors.muted, marginBottom: 24 }}>Check your connection and try again</Text>
+          <TouchableOpacity onPress={load} style={{ backgroundColor: Colors.green, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 14 }}>
+            <Text style={{ fontFamily: Font.display, fontSize: 15, color: '#fff' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const prof = profile;
   const level = xpToLevel(prof?.total_xp ?? 0);
   const nextLevel = level + 1;
@@ -145,21 +176,40 @@ export default function DashboardScreen({ navigation }: any) {
   const coins = prof?.coins ?? 0;
   const hearts = prof?.hearts ?? 5;
 
-  const lessonDone = !nextLesson;
+  const today = new Date().toDateString();
+  const lastActive = prof?.last_active_at ? new Date(prof.last_active_at).toDateString() : null;
+  const completedTodaysLesson = lastActive === today;
+  const batchName = prof?.batch_name ?? '';
+
+  // Days remaining on current topic
+  const currentTopic = nextLesson?.topic ?? null;
+  let daysRemaining: number | null = null;
+  if ((currentTopic as any)?.topic_end_date) {
+    const end = new Date((currentTopic as any).topic_end_date);
+    daysRemaining = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
+  }
+
+  const lessonDone = !nextLesson || completedTodaysLesson;
   const progressPct = nextLesson
     ? Math.round((nextLesson.topic.lessons_completed / nextLesson.topic.total_lessons) * 100)
     : 100;
 
   const tasks = [
     { title: 'Daily lesson', sub: nextLesson?.lesson.title ?? 'All done!', done: lessonDone, reward: `+${nextLesson?.lesson.xp_reward ?? 50} XP` },
-    { title: 'Daily Challenge', sub: '5 mixed questions', done: false, reward: '+30 XP' },
-    { title: 'Win 1 Duel', sub: 'Reaction Duel', done: false, reward: '+15 XP' },
+    { title: 'Daily Challenge', sub: '5 mixed questions', done: prof?.daily_challenge_done ?? false, reward: '+30 XP' },
+    { title: 'Win 1 Duel', sub: 'Reaction Duel', done: prof?.duel_won_today ?? false, reward: '+15 XP' },
   ];
 
   const xpToNext = Math.round((1 - xpPct) * (XP_NEEDED[level - 1] ?? 10000));
 
   return (
     <SafeAreaView style={s.safe}>
+      <CelebrationOverlay
+        type="streak"
+        visible={showStreakCelebration}
+        onDone={() => setShowStreakCelebration(false)}
+        duration={2800}
+      />
       <StatHeader streak={streak} xp={totalXp} coins={coins} hearts={hearts} />
 
       <ScrollView
@@ -176,6 +226,20 @@ export default function DashboardScreen({ navigation }: any) {
           <FlaskyMascot size={46} />
         </View>
 
+        {/* Batch context banner */}
+        <View style={s.batchBanner}>
+          <Text style={s.batchIcon}>{batchName ? '🎓' : '📚'}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.batchName}>{batchName || 'Free Study'}</Text>
+            {currentTopic && (
+              <Text style={s.batchTopic}>
+                {currentTopic.title}
+                {daysRemaining !== null ? ` · ${daysRemaining}d left` : ''}
+              </Text>
+            )}
+          </View>
+        </View>
+
         {/* Hero card */}
         <LinearGradient
           colors={['#2f6bfe', '#5b8bff']}
@@ -189,7 +253,7 @@ export default function DashboardScreen({ navigation }: any) {
               <Text style={s.levelDiscText}>L{level}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.heroTitle}>Level {level} · Reactant</Text>
+              <Text style={s.heroTitle}>Level {level} · {levelName(prof?.total_xp ?? 0)}</Text>
               <View style={s.xpBarBg}>
                 <View style={[s.xpBarFill, { width: `${Math.round(xpPct * 100)}%` as any }]} />
               </View>
@@ -328,9 +392,13 @@ const s = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { paddingHorizontal: 18, paddingBottom: 48 },
 
-  welcome: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 },
+  welcome: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10 },
   welcomeSub: { fontFamily: Font.body, fontSize: 14, color: '#8a92ab' },
   welcomeName: { fontFamily: Font.display, fontSize: 24, color: Colors.ink, lineHeight: 28 },
+  batchBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, borderRadius: Radius.card, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: Colors.border, gap: 10 },
+  batchIcon: { fontSize: 20 },
+  batchName: { fontFamily: Font.display, fontSize: 13, color: Colors.ink },
+  batchTopic: { fontFamily: Font.body, fontSize: 12, color: Colors.muted, marginTop: 1 },
 
   heroCard: { borderRadius: 22, padding: 18, marginBottom: 14, overflow: 'hidden' },
   heroDecor: {

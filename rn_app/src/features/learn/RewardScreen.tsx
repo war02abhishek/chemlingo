@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
   Animated, Easing, ScrollView,
 } from 'react-native';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import FlaskyMascot from '../../core/components/FlaskyMascot';
+import CelebrationOverlay from '../../core/components/CelebrationOverlay';
 import { Colors, Font, Shadow3D } from '../../core/theme';
 
 // ── Confetti config (exact from design) ──────────────────────────────────────
@@ -110,6 +111,8 @@ interface Params {
 export default function RewardScreen({ route, navigation }: any) {
   const { xp = 0, coins = 0, accuracy = 80, lessonTitle = 'Lesson', lessonId, streak = false }: Params = route.params ?? {};
 
+  const [showCelebration, setShowCelebration] = useState(true);
+
   // popIn animation for mascot
   const popIn = useRef(new Animated.Value(0.7)).current;
   const popOpacity = useRef(new Animated.Value(0)).current;
@@ -123,6 +126,12 @@ export default function RewardScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={s.safe}>
+      <CelebrationOverlay
+        type="lesson"
+        visible={showCelebration}
+        onDone={() => setShowCelebration(false)}
+        duration={2200}
+      />
       {/* Confetti layer */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {CONF_PIECES.map((p, i) => (

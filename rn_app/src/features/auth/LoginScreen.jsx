@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, SafeAreaView,
+  StyleSheet, ActivityIndicator, SafeAreaView, ScrollView,
 } from 'react-native';
 import { login } from '../../core/api';
 
-export default function LoginScreen({ navigation, onLoginSuccess }) {
+export default function LoginScreen({ navigation, onLoginSuccess, route }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,7 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
 
   return (
     <SafeAreaView style={s.safe}>
-      <View style={s.container}>
+      <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>🧪 Flasky</Text>
         <Text style={s.subtitle}>Learn · Practice · Compete</Text>
 
@@ -52,14 +52,18 @@ export default function LoginScreen({ navigation, onLoginSuccess }) {
         <TouchableOpacity style={s.btn} onPress={handleLogin} disabled={loading}>
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Login</Text>}
         </TouchableOpacity>
-      </View>
+
+        <TouchableOpacity style={s.registerLink} onPress={() => navigation?.navigate('Register')}>
+          <Text style={s.registerLinkText}>Don't have an account? <Text style={s.registerLinkBold}>Sign up</Text></Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  container: { flex: 1, justifyContent: 'center', padding: 24 },
+  safe:      { flex: 1, backgroundColor: '#fff' },
+  container: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   title: { fontSize: 32, fontWeight: 'bold', marginBottom: 4 },
   subtitle: { color: '#888', marginBottom: 40 },
   input: {
@@ -71,5 +75,8 @@ const s = StyleSheet.create({
     backgroundColor: '#2fc665', borderRadius: 10,
     padding: 16, alignItems: 'center', marginTop: 8,
   },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  btnText:           { color: '#fff', fontWeight: '600', fontSize: 16 },
+  registerLink:      { marginTop: 20, alignItems: 'center' },
+  registerLinkText:  { color: '#888', fontSize: 14 },
+  registerLinkBold:  { color: '#2fc665', fontWeight: '700' },
 });

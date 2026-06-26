@@ -49,6 +49,16 @@ export function xpToLevel(totalXp: number): number {
   return level;
 }
 
+const LEVEL_NAMES = [
+  'Reactant', 'Atom', 'Molecule', 'Compound', 'Catalyst',
+  'Electron', 'Ion', 'Isotope', 'Nucleus', 'Chemist',
+];
+
+export function levelName(totalXp: number): string {
+  const level = xpToLevel(totalXp);
+  return LEVEL_NAMES[level - 1] ?? 'Master Chemist';
+}
+
 export function xpProgressInLevel(totalXp: number): { current: number; needed: number; pct: number } {
   const level = xpToLevel(totalXp);
   const idx = level - 1;

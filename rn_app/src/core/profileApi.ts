@@ -100,6 +100,11 @@ export interface Profile {
   current_streak: number;
   coins: number;
   hearts: number;
+  last_active_at: string;
+  batch_name?: string;
+  needs_password_change?: boolean;
+  daily_challenge_done?: boolean;
+  duel_won_today?: boolean;
 }
 
 export interface DuelResultEntry {
@@ -116,11 +121,14 @@ export interface DuelResultEntry {
 
 export interface ChallengeQuestion {
   id: string;
-  display: string;       // e.g. "H₂ + O₂ → H₂O"
-  labels: string[];      // one per term
-  separator_idx: number; // → appears before labels[separator_idx]
+  type: 'mcq' | 'element_id' | 'true_false' | 'balancing';
+  prompt: string;
+  options: string[];     // choice questions; empty for balancing
+  concept: string;
   difficulty: 'easy' | 'medium' | 'hard';
-  chip_max: number;
+  is_pyq: boolean;
+  pyq_exam?: string;
+  pyq_year?: number;
 }
 
 export interface DailyChallengeSubmission {
@@ -225,7 +233,11 @@ export async function fetchDailyChallenge(): Promise<DailyChallengeResponse> {
 
 export async function submitDailyChallenge(payload: {
   completion_time_ms: number;
-  answers: { question_id: string; coefficients: number[] }[];
+  answers: {
+    question_id: string;
+    selected_index: number;   // for mcq / element_id / true_false
+    coefficients: number[];   // for balancing (empty array otherwise)
+  }[];
 }): Promise<SubmitChallengeResponse> {
   const { data } = await http.post<SubmitChallengeResponse>('/api/v1/daily-challenge/submit', payload);
   return data;

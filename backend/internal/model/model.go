@@ -7,38 +7,45 @@ import (
 )
 
 type Student struct {
-	ID            uuid.UUID `json:"id"`
-	InstituteID   uuid.UUID `json:"institute_id"`
-	Email         string    `json:"email"`
-	FullName      string    `json:"full_name"`
-	Batch         string    `json:"batch"`
-	CurrentStreak int       `json:"current_streak"`
-	MaxStreak     int       `json:"max_streak"`
-	Catalysts     int       `json:"catalysts"`
-	TotalXP       int       `json:"total_xp"`
-	LastActiveAt  time.Time `json:"last_active_at"`
-	Rating        int       `json:"rating"`
-	Wins          int       `json:"wins"`
-	Losses        int       `json:"losses"`
-	Role          string    `json:"role"`
-	Coins         int       `json:"coins"`
-	Hearts        int       `json:"hearts"`
+	ID                  uuid.UUID `json:"id"`
+	InstituteID         uuid.UUID `json:"institute_id"`
+	Email               string    `json:"email"`
+	FullName            string    `json:"full_name"`
+	Batch               string    `json:"batch"`
+	CurrentStreak       int       `json:"current_streak"`
+	MaxStreak           int       `json:"max_streak"`
+	Catalysts           int       `json:"catalysts"`
+	TotalXP             int       `json:"total_xp"`
+	LastActiveAt        time.Time `json:"last_active_at"`
+	Rating              int       `json:"rating"`
+	Wins                int       `json:"wins"`
+	Losses              int       `json:"losses"`
+	Role                string    `json:"role"`
+	Coins               int       `json:"coins"`
+	Hearts              int       `json:"hearts"`
+	NeedsPasswordChange bool      `json:"needs_password_change"`
+	BatchName           string    `json:"batch_name,omitempty"`
 }
 
 // Profile is returned by GET /api/v1/profile.
 type Profile struct {
-	PlayerID      string `json:"player_id"`
-	Name          string `json:"name"`
-	Email         string `json:"email"`
-	Rating        int    `json:"rating"`
-	Wins          int    `json:"wins"`
-	Losses        int    `json:"losses"`
-	Rank          string `json:"rank"`
-	RankEmoji     string `json:"rank_emoji"`
-	TotalXP       int    `json:"total_xp"`
-	CurrentStreak int    `json:"current_streak"`
-	Coins         int    `json:"coins"`
-	Hearts        int    `json:"hearts"`
+	PlayerID            string    `json:"player_id"`
+	Name                string    `json:"name"`
+	Email               string    `json:"email"`
+	Rating              int       `json:"rating"`
+	Wins                int       `json:"wins"`
+	Losses              int       `json:"losses"`
+	Rank                string    `json:"rank"`
+	RankEmoji           string    `json:"rank_emoji"`
+	TotalXP             int       `json:"total_xp"`
+	CurrentStreak       int       `json:"current_streak"`
+	Coins               int       `json:"coins"`
+	Hearts              int       `json:"hearts"`
+	LastActiveAt        time.Time `json:"last_active_at"`
+	BatchName           string    `json:"batch_name,omitempty"`
+	NeedsPasswordChange bool      `json:"needs_password_change"`
+	DailyChallengeDone  bool      `json:"daily_challenge_done"`
+	DuelWonToday        bool      `json:"duel_won_today"`
 }
 
 // DuelResult is one entry in GET /api/v1/profile/history.
@@ -138,6 +145,7 @@ type CompoundLeaderboardEntry struct {
 // ── Curriculum ────────────────────────────────────────────────────────────────
 
 // TopicWithProgress is returned by GET /api/v1/curriculum.
+// LockReason: "" = unlocked, "self" = beat previous boss, "teacher" = waiting for teacher
 type TopicWithProgress struct {
 	ID               string `json:"id"`
 	Slug             string `json:"slug"`
@@ -147,6 +155,7 @@ type TopicWithProgress struct {
 	TotalLessons     int    `json:"total_lessons"`
 	LessonsCompleted int    `json:"lessons_completed"`
 	BossDefeated     bool   `json:"boss_defeated"`
+	LockReason       string `json:"lock_reason"`
 }
 
 // LessonWithStatus is returned inside a topic's lesson list.

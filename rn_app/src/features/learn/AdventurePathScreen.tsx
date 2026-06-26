@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  SafeAreaView, Animated, Easing, ActivityIndicator,
+  SafeAreaView, Animated, Easing, ActivityIndicator, Alert,
 } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { fetchCurriculum, fetchTopicLessons, TopicWithProgress, LessonWithStatus } from '../../core/curriculumApi';
@@ -167,6 +167,7 @@ function StartBubble() {
 interface TopicSection {
   topic: TopicWithProgress;
   nodes: LessonNode[];
+  lockReason: '' | 'self' | 'teacher';
 }
 
 export default function AdventurePathScreen({ navigation }: any) {
@@ -181,12 +182,18 @@ export default function AdventurePathScreen({ navigation }: any) {
       const built: TopicSection[] = [];
 
       for (const topic of curr.topics) {
+        const lockReason = topic.lock_reason ?? '';
+        if (lockReason !== '') {
+          // Topic locked — no need to fetch lessons, show placeholder locked nodes
+          built.push({ topic, nodes: [], lockReason });
+          continue;
+        }
         const { lessons } = await fetchTopicLessons(topic.slug);
         const nodes: LessonNode[] = lessons.map((l, idx) => {
           const prevCompleted = idx === 0 ? true : lessons[idx - 1].completed;
           return { lesson: l, topic, kind: getNodeKind(l, prevCompleted) };
         });
-        built.push({ topic, nodes });
+        built.push({ topic, nodes, lockReason });
       }
 
       setSections(built);
@@ -242,13 +249,26 @@ export default function AdventurePathScreen({ navigation }: any) {
           const topicPct = Math.round((section.topic.lessons_completed / section.topic.total_lessons) * 100);
           const topicPctStr = `${section.topic.lessons_completed}/${section.topic.total_lessons}`;
 
-          return (
+          const isTopicLocked = section.lockReason !== '';
+        const lockMsg = section.lockReason === 'teacher'
+          ? "Your teacher hasn't unlocked this topic yet"
+          : 'Complete the previous topic\'s boss battle first';
+
+        return (
             <View key={section.topic.slug} style={styles.sectionWrap}>
-              {/* Green topic banner */}
-              <View style={styles.topicBanner}>
+              {/* Topic banner — dimmed if locked */}
+              <TouchableOpacity
+                activeOpacity={isTopicLocked ? 0.7 : 1}
+                onPress={isTopicLocked ? () => Alert.alert('Topic Locked', lockMsg) : undefined}
+              >
+              <View style={[styles.topicBanner, isTopicLocked && { opacity: 0.5 }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.bannerTopic}>{section.topic.title}</Text>
-                  <Text style={styles.bannerLesson}>{currentNode?.lesson.title ?? 'All complete!'}</Text>
+                  <Text style={styles.bannerLesson}>
+                    {isTopicLocked
+                      ? (section.lockReason === 'teacher' ? '🔒 Teacher locked' : '🔒 Locked')
+                      : (currentNode?.lesson.title ?? 'All complete!')}
+                  </Text>
                   <View style={styles.bannerBarBg}>
                     <View style={[styles.bannerBarFill, { width: `${topicPct}%` as any }]} />
                   </View>
@@ -258,9 +278,10 @@ export default function AdventurePathScreen({ navigation }: any) {
                   <Text style={styles.bannerCountLabel}>Lessons</Text>
                 </View>
               </View>
+              </TouchableOpacity>
 
-              {/* Winding nodes */}
-              <View style={styles.pathColumn}>
+              {/* Winding nodes — hidden for locked topics */}
+              {isTopicLocked ? null : <View style={styles.pathColumn}>
                 {section.nodes.map((node, idx) => {
                   const offset = NODE_OFFSETS[idx % NODE_OFFSETS.length];
                   const isCurrent = node.kind === 'current';
@@ -314,7 +335,25 @@ export default function AdventurePathScreen({ navigation }: any) {
                     <Text style={[styles.nodeLabel, { color: '#8b5cf6' }]}>Boss Battle</Text>
                   </View>
                 </View>
-              </View>
+
+                {/* PYQ Past Papers button */}
+                <TouchableOpacity
+                  style={styles.pyqBtn}
+                  onPress={() => navigation.navigate('PYQ', {
+                    topicId: section.topic.id,
+                    topicTitle: section.topic.title,
+                    topicSlug: section.topic.slug,
+                  })}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.pyqIcon}>📋</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pyqTitle}>Past Year Questions</Text>
+                    <Text style={styles.pyqSub}>JEE & NEET PYQs · {section.topic.title}</Text>
+                  </View>
+                  <Text style={styles.pyqArrow}>→</Text>
+                </TouchableOpacity>
+              </View>}
             </View>
           );
         })}
@@ -355,6 +394,17 @@ const styles = StyleSheet.create({
   bannerCountLabel: { fontFamily: Font.body, fontSize: 10, color: '#d6ffe6', textTransform: 'uppercase' },
 
   pathColumn: { gap: 30, paddingVertical: 26 },
+
+  pyqBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: Colors.amber + '15', borderRadius: Radius.card,
+    borderWidth: 1.5, borderColor: Colors.amber + '40',
+    padding: 14, marginTop: 8,
+  },
+  pyqIcon:  { fontSize: 24 },
+  pyqTitle: { fontFamily: Font.display, fontSize: 14, color: Colors.ink },
+  pyqSub:   { fontFamily: Font.body, fontSize: 12, color: Colors.muted, marginTop: 1 },
+  pyqArrow: { fontFamily: Font.display, fontSize: 16, color: Colors.amber },
 
   nodeRow: { alignItems: 'center' },
   nodeInner: { alignItems: 'center', gap: 9, position: 'relative' },

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/chemlingo/backend/internal/model"
+	"github.com/chemlingo/backend/internal/predictor"
 	"github.com/chemlingo/backend/internal/store"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -86,5 +87,92 @@ func (h *CurriculumHandler) CompleteLesson(c *gin.Context) {
 		"xp_earned":    lesson.XPReward,
 		"coins_earned": lesson.CoinReward,
 		"already_done": false,
+	})
+}
+
+// GetBossQuestions handles GET /api/v1/topics/:id/boss
+func (h *CurriculumHandler) GetBossQuestions(c *gin.Context) {
+	topicID := c.Param("id")
+	if _, err := h.store.GetTopicByID(c.Request.Context(), topicID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "topic not found"})
+		return
+	}
+
+	questions := predictor.ForBoss(topicID)
+	c.JSON(http.StatusOK, gin.H{"questions": questions})
+}
+
+// SubmitBoss handles POST /api/v1/topics/:id/boss/submit
+func (h *CurriculumHandler) SubmitBoss(c *gin.Context) {
+	playerID := c.MustGet("student_id").(uuid.UUID)
+	topicID := c.Param("id")
+
+	if _, err := h.store.GetTopicByID(c.Request.Context(), topicID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "topic not found"})
+		return
+	}
+
+	var req struct {
+		Answers []struct {
+			QuestionID    string `json:"question_id"`
+			SelectedIndex int    `json:"selected_index"`
+		} `json:"answers"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	questions := predictor.ForBossWithAnswers(topicID)
+	qMap := make(map[string]predictor.Question, len(questions))
+	for _, q := range questions {
+		qMap[q.ID] = q
+	}
+
+	correct := 0
+	type result struct {
+		QuestionID   string `json:"question_id"`
+		Correct      bool   `json:"correct"`
+		CorrectIndex int    `json:"correct_index"`
+	}
+	results := make([]result, 0, len(req.Answers))
+	for _, a := range req.Answers {
+		q, ok := qMap[a.QuestionID]
+		if !ok {
+			continue
+		}
+		isCorrect := a.SelectedIndex == q.CorrectIndex
+		if isCorrect {
+			correct++
+		}
+		results = append(results, result{
+			QuestionID:   a.QuestionID,
+			Correct:      isCorrect,
+			CorrectIndex: q.CorrectIndex,
+		})
+	}
+
+	total := len(questions)
+	passed := correct*10 >= total*7 // ≥70%
+	score := correct * 100
+
+	if err := h.store.SaveBossResult(c.Request.Context(), playerID, topicID, score, passed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save result"})
+		return
+	}
+
+	xpEarned, coinsEarned := 0, 0
+	if passed {
+		xpEarned, coinsEarned = 200, 50
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"correct":      correct,
+		"total":        total,
+		"score":        score,
+		"passed":       passed,
+		"xp_earned":    xpEarned,
+		"coins_earned": coinsEarned,
+		"results":      results,
 	})
 }

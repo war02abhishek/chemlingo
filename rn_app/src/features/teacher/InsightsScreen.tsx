@@ -9,11 +9,19 @@ import { Colors, Font, Radius } from '../../core/theme';
 function WeakCard({ w }: { w: WeakLesson }) {
   const pct = Math.round(w.avg_score);
   const barColor = pct < 40 ? Colors.red : pct < 60 ? Colors.orange : Colors.amber;
+  const severity = pct < 40 ? 'High' : 'Med';
+  const severityBg = pct < 40 ? Colors.red + '20' : Colors.orange + '20';
+  const severityColor = pct < 40 ? Colors.red : Colors.orange;
   return (
     <View style={s.card}>
       <View style={s.cardTop}>
         <View style={{ flex: 1 }}>
-          <Text style={s.lessonTitle}>{w.lesson_title}</Text>
+          <View style={s.titleRow}>
+            <Text style={s.lessonTitle}>{w.lesson_title}</Text>
+            <View style={[s.severityBadge, { backgroundColor: severityBg }]}>
+              <Text style={[s.severityText, { color: severityColor }]}>{severity}</Text>
+            </View>
+          </View>
           <Text style={s.topicTitle}>{w.topic_title}</Text>
         </View>
         <View style={[s.scoreBadge, { backgroundColor: barColor + '20' }]}>
@@ -95,7 +103,10 @@ const s = StyleSheet.create({
     padding: 16, gap: 10,
   },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   lessonTitle: { fontFamily: Font.display, fontSize: 15, color: Colors.ink },
+  severityBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  severityText: { fontFamily: Font.display, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   topicTitle: { fontFamily: Font.body, fontSize: 12, color: Colors.muted, marginTop: 2 },
   scoreBadge: { borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 6 },
   scoreVal: { fontFamily: Font.display, fontSize: 16 },

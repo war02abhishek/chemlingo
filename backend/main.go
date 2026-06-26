@@ -56,13 +56,21 @@ func main() {
 	curriculumHandler := handler.NewCurriculumHandler(s)
 	predictorHandler := handler.NewPredictorHandler(s)
 	teacherHandler := handler.NewTeacherHandler(s)
+	pyqHandler := handler.NewPYQHandler(s)
+	questionsHandler := handler.NewQuestionsHandler(s)
 	duelHub := duel.NewHub(rdb, duel.LoadEquations(), cfg.JWTSecret, s)
 
 	// ── Routes ────────────────────────────────────────────────────────────────
 	r := gin.Default()
 
+	// Rate limiters: 5 req/min burst for auth, 2 req/s burst for duel matching
+	authRL := middleware.RateLimit(5.0/60, 5)
+	duelRL  := middleware.RateLimit(2, 10)
+
 	// Public
-	r.POST("/auth/login", authHandler.Login)
+	r.POST("/auth/login", authRL, authHandler.Login)
+	r.POST("/auth/register", authRL, authHandler.Register)
+	r.POST("/auth/refresh", authHandler.Refresh)
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	// Duel WebSocket — JWT via ?token= (React Native can't set WS headers)
@@ -71,7 +79,7 @@ func main() {
 	// Protected
 	api := r.Group("/api/v1", middleware.Auth(cfg.JWTSecret))
 	{
-		api.POST("/duel/match", duelHub.HandleCreateMatch)
+		api.POST("/duel/match", duelRL, duelHub.HandleCreateMatch)
 		api.GET("/profile", profileHandler.GetProfile)
 		api.GET("/profile/history", profileHandler.GetHistory)
 		api.GET("/leaderboard", leaderboardHandler.GetLeaderboard)
@@ -92,6 +100,8 @@ func main() {
 		api.GET("/curriculum", curriculumHandler.GetCurriculum)
 		api.GET("/curriculum/progress", curriculumHandler.GetProgress)
 		api.POST("/lessons/:id/complete", curriculumHandler.CompleteLesson)
+		api.GET("/topics/:id/boss", curriculumHandler.GetBossQuestions)
+		api.POST("/topics/:id/boss/submit", curriculumHandler.SubmitBoss)
 
 		// Reaction Predictor
 		api.GET("/predictor/lesson/:lesson_id", predictorHandler.GetLessonQuestions)
@@ -101,9 +111,32 @@ func main() {
 		// Teacher
 		api.GET("/teacher/overview", teacherHandler.GetOverview)
 		api.GET("/teacher/students", teacherHandler.GetStudents)
+		api.GET("/teacher/students/:id", teacherHandler.GetStudentDetail)
 		api.GET("/teacher/insights", teacherHandler.GetInsights)
 		api.GET("/teacher/batches", teacherHandler.GetBatches)
 		api.POST("/teacher/batches", teacherHandler.CreateBatch)
+		api.POST("/teacher/batches/:id/students", teacherHandler.AddStudentToBatch)
+		api.GET("/teacher/batches/:id/curriculum", teacherHandler.GetBatchCurriculum)
+		api.PUT("/teacher/batches/:id/topic/advance", teacherHandler.AdvanceBatchTopic)
+		api.PUT("/teacher/batches/:id/topic/pause", teacherHandler.PauseBatchTopic)
+		api.PUT("/teacher/batches/:id/topic/extend", teacherHandler.ExtendBatchTopic)
+
+		// PYQ
+		api.GET("/topics/:id/pyq", pyqHandler.GetPYQQuestions)
+		api.POST("/topics/:id/pyq/submit", pyqHandler.SubmitPYQ)
+
+		// Question bank — teacher CRUD
+		api.POST("/teacher/questions", questionsHandler.Create)
+		api.PUT("/teacher/questions/:id/approve", questionsHandler.Approve)
+		api.GET("/teacher/questions", questionsHandler.List)
+
+		// Question bank — student-facing (approved only)
+		api.GET("/questions", questionsHandler.ListApproved)
+		api.POST("/questions/submit", questionsHandler.Submit)
+
+		// Student batch join + password change
+		api.POST("/batches/join", teacherHandler.JoinBatch)
+		api.PUT("/profile/password", authHandler.SetPassword)
 	}
 
 	log.Printf("ChemLingo backend running on :%s", cfg.Port)

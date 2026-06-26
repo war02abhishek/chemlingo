@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
-  ActivityIndicator, RefreshControl, TextInput,
+  ActivityIndicator, RefreshControl, TextInput, TouchableOpacity,
 } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { fetchBatchStudents, StudentRow } from '../../core/teacherApi';
 import { Colors, Font, Radius } from '../../core/theme';
 import { xpToLevel } from '../../core/theme';
@@ -11,11 +12,11 @@ function initials(name: string) {
   return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
-function StudentCard({ s }: { s: StudentRow }) {
+function StudentCard({ s, onPress }: { s: StudentRow; onPress: () => void }) {
   const level = xpToLevel(s.total_xp);
   const isAtRisk = !s.last_active || new Date(s.last_active) < new Date(Date.now() - 3 * 86400000);
   return (
-    <View style={card.wrap}>
+    <TouchableOpacity style={card.wrap} onPress={onPress} activeOpacity={0.7}>
       <View style={card.avatar}>
         <Text style={card.avatarText}>{initials(s.full_name)}</Text>
       </View>
@@ -27,7 +28,8 @@ function StudentCard({ s }: { s: StudentRow }) {
         <Text style={card.meta}>Lv {level} · {s.current_streak}🔥 streak · {s.lessons_this_week} lessons this week</Text>
       </View>
       <Text style={card.xp}>{s.total_xp} XP</Text>
-    </View>
+      <Text style={{ fontSize: 16, color: Colors.muted }}>›</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -51,7 +53,15 @@ const card = StyleSheet.create({
   xp: { fontFamily: Font.display, fontSize: 13, color: Colors.blue },
 });
 
+function isAtRisk(s: StudentRow) {
+  return !s.last_active || new Date(s.last_active) < new Date(Date.now() - 3 * 86400000);
+}
+
 export default function StudentsScreen() {
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const activeFilter: 'at_risk' | undefined = route.params?.filter;
+
   const [all, setAll] = useState<StudentRow[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -69,9 +79,9 @@ export default function StudentsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = query
-    ? all.filter((s) => s.full_name.toLowerCase().includes(query.toLowerCase()))
-    : all;
+  const filtered = all
+    .filter((s) => !query || s.full_name.toLowerCase().includes(query.toLowerCase()))
+    .filter((s) => activeFilter !== 'at_risk' || isAtRisk(s));
 
   if (loading) {
     return (
@@ -98,10 +108,21 @@ export default function StudentsScreen() {
         />
       </View>
 
+      {activeFilter === 'at_risk' && (
+        <View style={st.filterBanner}>
+          <Text style={st.filterText}>⚠️ Showing at-risk students only</Text>
+          <TouchableOpacity onPress={() => navigation.setParams({ filter: undefined })}>
+            <Text style={st.filterClear}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <StudentCard s={item} />}
+        renderItem={({ item }) => (
+          <StudentCard s={item} onPress={() => navigation.navigate('StudentDetail', { studentId: item.id, name: item.full_name })} />
+        )}
         contentContainerStyle={st.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.blue} />
@@ -132,4 +153,12 @@ const st = StyleSheet.create({
   list: { paddingHorizontal: 20, paddingBottom: 24 },
   empty: { alignItems: 'center', marginTop: 60 },
   emptyText: { fontFamily: Font.body, fontSize: 14, color: Colors.muted },
+  filterBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 20, marginBottom: 8,
+    backgroundColor: Colors.red + '12', borderRadius: Radius.chip,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  filterText: { fontFamily: Font.body, fontSize: 13, color: Colors.red, flex: 1 },
+  filterClear: { fontFamily: Font.display, fontSize: 13, color: Colors.red },
 });

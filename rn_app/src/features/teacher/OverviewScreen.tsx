@@ -1,25 +1,33 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, TouchableOpacity,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { fetchTeacherOverview, TeacherOverview } from '../../core/teacherApi';
 import { Colors, Font, Radius } from '../../core/theme';
 
-function KPICard({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) {
-  return (
+function KPICard({ label, value, icon, color, onPress }: {
+  label: string; value: string | number; icon: string; color: string; onPress?: () => void;
+}) {
+  const inner = (
     <View style={[s.kpiCard, { borderTopColor: color }]}>
       <Text style={s.kpiIcon}>{icon}</Text>
       <Text style={[s.kpiVal, { color }]}>{value}</Text>
       <Text style={s.kpiLabel}>{label}</Text>
     </View>
   );
+  if (onPress) {
+    return <TouchableOpacity onPress={onPress} activeOpacity={0.75}>{inner}</TouchableOpacity>;
+  }
+  return inner;
 }
 
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MOCK_BARS = [40, 60, 35, 80, 55, 20, 10];
 
 export default function OverviewScreen() {
+  const navigation = useNavigation<any>();
   const [data, setData] = useState<TeacherOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,7 +73,13 @@ export default function OverviewScreen() {
           <KPICard label="Active Students" value={data?.active_students ?? 0} icon="👨‍🎓" color={Colors.blue} />
           <KPICard label="Avg Streak" value={`${(data?.avg_streak ?? 0).toFixed(1)}d`} icon="🔥" color={Colors.orange} />
           <KPICard label="Lessons / Week" value={data?.lessons_this_week ?? 0} icon="📚" color={Colors.green} />
-          <KPICard label="At Risk" value={data?.at_risk_count ?? 0} icon="⚠️" color={Colors.red} />
+          <KPICard
+            label="At Risk"
+            value={data?.at_risk_count ?? 0}
+            icon="⚠️"
+            color={Colors.red}
+            onPress={() => navigation.navigate('Students', { screen: 'StudentsList', params: { filter: 'at_risk' } })}
+          />
         </View>
 
         {(data?.at_risk_count ?? 0) > 0 && (

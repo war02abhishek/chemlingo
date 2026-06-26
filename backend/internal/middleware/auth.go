@@ -12,6 +12,7 @@ import (
 type Claims struct {
 	StudentID   uuid.UUID `json:"student_id"`
 	InstituteID uuid.UUID `json:"institute_id"`
+	TokenType   string    `json:"token_type,omitempty"` // "access" or "refresh"
 	jwt.RegisteredClaims
 }
 

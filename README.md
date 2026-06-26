@@ -60,6 +60,65 @@ Student advances through Adventure Path → earns XP/coins → unlocks next less
 
 ## Architecture
 
+### High-Level Design
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Android App (React Native)                       │
+│                                                                      │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
+│  │   Learn Tab      │  │   Compete Tab    │  │   Teacher App      │  │
+│  │                  │  │                  │  │                    │  │
+│  │ Dashboard        │  │ Reaction Duel    │  │ Overview (KPIs)    │  │
+│  │ Adventure Path   │  │ Periodic Sprint  │  │ Students roster    │  │
+│  │ Lesson Intro     │  │ Compound Builder │  │ Insights           │  │
+│  │ Reaction         │  │ Daily Challenge  │  │ Manage batches     │  │
+│  │   Predictor      │  │ Leaderboard      │  │                    │  │
+│  │ Reward Screen    │  │                  │  │                    │  │
+│  └─────────────────┘  └──────────────────┘  └────────────────────┘  │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                    HTTPS (REST API)  +  WSS (WebSocket, duel only)
+                                │
+┌───────────────────────────────▼─────────────────────────────────────┐
+│                     Go / Gin  —  :8080                               │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
+│  │ /auth/login  │  │ /curriculum  │  │ /teacher/overview         │  │
+│  │              │  │ /lessons/:id │  │ /teacher/students         │  │
+│  │              │  │   /complete  │  │ /teacher/insights         │  │
+│  └──────────────┘  └──────────────┘  │ /teacher/batches          │  │
+│  ┌──────────────┐  ┌──────────────┐  └───────────────────────────┘  │
+│  │ /predictor   │  │ /profile     │  ┌───────────────────────────┐  │
+│  │ /sprint      │  │ /leaderboard │  │     Duel Hub (WebSocket)  │  │
+│  │ /compound    │  │ /daily-      │  │                           │  │
+│  │              │  │  challenge   │  │  localClients map         │  │
+│  └──────────────┘  └──────────────┘  │  (per-pod, in-memory)    │  │
+│                                      └───────────────────────────┘  │
+└────────────────────────┬────────────────────────┬────────────────────┘
+                         │                        │
+              ┌──────────▼──────────┐   ┌─────────▼──────────────┐
+              │     PostgreSQL      │   │         Redis           │
+              │                     │   │                         │
+              │ students            │   │ Match queue    (LIST)   │
+              │ topics / lessons    │   │ Match state    (HASH)   │
+              │ lesson_completions  │   │ Pub/Sub events (ch)     │
+              │ duel_results        │   │ Conn dedup     (SETNX)  │
+              │ daily_challenge_    │   │ Round lock     (SETNX)  │
+              │   submissions       │   │ Conn counter   (INCR)   │
+              │ sprint / compound   │   │                         │
+              └─────────────────────┘   └─────────────────────────┘
+```
+
+**What goes where:**
+- **Postgres** — everything that needs to persist forever: users, curriculum progress, scores, match history
+- **Redis** — everything the duel system needs to coordinate across pods in real-time: matchmaking queue, live match state, pub/sub event delivery, short-lived locks
+- **In-memory (per pod)** — only the WebSocket connection handles (`localClients`), because WebSocket connections are OS-level file descriptors that can't be shared or serialized
+
+---
+
+### File Structure
+
 ```
 flasky/  (repo root: chemlingo/)
 ├── backend/                        # Go (Gin) — REST + WebSocket
@@ -355,6 +414,154 @@ The bot joins the queue, auto-submits the correct answer after 3 seconds. Increa
 | GET | `/api/v1/teacher/insights` | Lessons with avg score < 60% |
 | GET | `/api/v1/teacher/batches` | All batches for this teacher |
 | POST | `/api/v1/teacher/batches` | `{name}` → create batch |
+
+---
+
+## Duel Architecture — WebSockets + Redis Pub/Sub
+
+This is the trickiest part of the system. Here's exactly how it works and why.
+
+### The Problem
+
+WebSocket connections are persistent and live **inside a specific process**. If you run two server pods and Player 1 connects to Pod A while Player 2 connects to Pod B, Pod A has no direct way to send a message to Player 2 — it doesn't own that connection. You can't share a WebSocket across processes.
+
+### The Solution: Each Pod Owns Its Local Connections, Redis Owns Everything Else
+
+Every pod maintains one in-memory map:
+
+```go
+localClients map[string][]*Client  // matchID → WebSocket connections on THIS pod
+```
+
+This is the only in-memory state. All match state, matchmaking, and event delivery go through Redis.
+
+### How It Works Step by Step
+
+#### 1. Matchmaking — Redis LIST `chemlingo:queue`
+
+```
+Player 1 taps "Find Match"
+  → Pod A: RPOP chemlingo:queue  →  empty (nobody waiting)
+  → Pod A: creates matchID, writes initial MatchState to Redis HASH
+  → Pod A: LPUSH chemlingo:queue  {playerID, name, matchID}
+
+Player 2 taps "Find Match"
+  → Pod B: RPOP chemlingo:queue  →  gets Player 1's entry
+  → Pod B: reads MatchState from Redis, adds Player 2, saves back
+  → Pod B: returns matchID to Player 2
+```
+
+`RPOP` is atomic — even if 100 players hit the queue simultaneously, each one either wins the pop or pushes themselves. No race condition, no locks needed here.
+
+#### 2. WebSocket Connection — Redis counter `chemlingo:match:<matchID>:conncount`
+
+Both players open a WebSocket to whatever pod they land on (could be the same, could be different):
+
+```
+Player 1 WebSocket → Pod A:
+  INCR chemlingo:match:<matchID>:conncount  →  1
+  Pod A adds Player 1 to localClients[matchID]
+
+Player 2 WebSocket → Pod B:
+  INCR chemlingo:match:<matchID>:conncount  →  2  ← triggers match start
+  Pod B adds Player 2 to localClients[matchID]
+  Pod B calls startMatch() → writes Active state to Redis → PUBLISH match_joined
+```
+
+The counter in Redis is the single source of truth for "are both players here?" It works regardless of which pods they connected to.
+
+#### 3. Every Event Goes Through Pub/Sub — `chemlingo:match:<matchID>`
+
+On startup every pod runs a background goroutine:
+
+```go
+func (h *Hub) subscribeLoop() {
+    pubsub := h.rdb.PSubscribe(ctx, "chemlingo:match:*")  // pattern: ALL matches
+    for msg := range pubsub.Channel() {
+        matchID := msg.Channel[len("chemlingo:match:"):]
+        h.deliverToLocalClients(matchID, msg.Payload)     // forward to local WebSockets
+    }
+}
+```
+
+When any pod calls `publish(matchID, event)`, Redis delivers that message to **every pod**. Each pod then checks its own `localClients[matchID]` — if it has WebSocket connections for that match, it forwards the message. If not, it ignores it.
+
+#### 4. Full Flow: Player 1 Submits Answer
+
+```
+Player 1 → WebSocket → Pod A receives submit_answer
+  Pod A validates answer, computes result
+  Pod A updates MatchState in Redis HASH
+  Pod A calls publish("match_abc", validation_result)
+         ↓
+    Redis Pub/Sub
+    chemlingo:match:match_abc
+         ↓              ↓
+       Pod A           Pod B
+  localClients      localClients
+  has P1's conn     has P2's conn
+       ↓                 ↓
+  sends to P1       sends to P2
+```
+
+Both players receive the same event in real-time, even though their WebSockets live on different pods. **Every message goes through Redis Pub/Sub, even when both players happen to be on the same pod** — this keeps the code uniform with no special cases.
+
+#### 5. Match End Lock — SETNX `chemlingo:match:<matchID>:endlock`
+
+When a match ends, multiple things can trigger `commitMatchEnd` simultaneously — both players finishing their last round, a disconnect forfeit, a timer. Without a lock, two goroutines (or two pods) could both try to write the final result to Postgres.
+
+```go
+set, err := h.rdb.SetNX(ctx, lockKey, "1", 15*time.Second).Result()
+if !set {
+    return // another goroutine/pod already handling this
+}
+// Only one winner gets here — persist ratings to Postgres, publish match_end
+```
+
+`SetNX` (Set if Not eXists) is atomic in Redis. Exactly one caller gets `set=true`. Everyone else exits early.
+
+#### 6. Reconnect Grace Window — `chemlingo:conn:<matchID>:<playerID>`
+
+If a player's WebSocket drops (bad network), we don't immediately forfeit them:
+
+```
+Player drops  →  Pod deletes conn key from Redis
+               →  Wait 30 seconds
+               →  Check if keyConn still exists (player reconnected and re-set it)
+               →  If still gone → forfeit, opponent wins
+```
+
+The conn key in Redis acts as a "player is alive" signal that any pod can check.
+
+### Visual Summary
+
+```
+         Player 1                     Player 2
+            │                            │
+            ▼                            ▼
+┌─────────── Pod A ───────────┐  ┌───── Pod B ──────────────────┐
+│  localClients:              │  │  localClients:               │
+│    match_abc → [P1 conn]    │  │    match_abc → [P2 conn]     │
+│                             │  │                              │
+│  subscribeLoop() listening  │  │  subscribeLoop() listening   │
+└──────────────┬──────────────┘  └───────────────┬──────────────┘
+               │    PUBLISH/SUBSCRIBE             │
+               └──────────────┬───────────────────┘
+                              │
+                         ┌────▼────────────────────────────────┐
+                         │              Redis                   │
+                         │  chemlingo:queue          (LIST)     │
+                         │  chemlingo:match:<id>     (HASH)     │
+                         │  chemlingo:match:<id>:*   (counters) │
+                         │  chemlingo:match:<id>     (Pub/Sub)  │
+                         └─────────────────────────────────────┘
+```
+
+### What Is NOT in Redis
+
+- The WebSocket connections themselves (can't be serialized — they're OS-level file descriptors)
+- The `localClients` map (intentionally per-pod; that's the point)
+- Curriculum, lessons, profiles, predictor scores — all in Postgres
 
 ---
 

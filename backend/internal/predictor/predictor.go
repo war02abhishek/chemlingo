@@ -81,6 +81,26 @@ func ForLessonWithAnswers(lessonID string) []Question {
 	return result
 }
 
+// ForBoss returns 10 questions for a Boss Battle, seeded by topic ID.
+func ForBoss(topicID string) []Question {
+	rng := rand.New(rand.NewSource(seed("boss:" + topicID)))
+	perm := rng.Perm(len(allQuestions))
+	count := 10
+	if len(allQuestions) < count {
+		count = len(allQuestions)
+	}
+	result := make([]Question, 0, count)
+	for _, i := range perm[:count] {
+		result = append(result, allQuestions[i])
+	}
+	return result
+}
+
+// ForBossWithAnswers returns 10 boss battle questions with answers for server-side validation.
+func ForBossWithAnswers(topicID string) []Question {
+	return ForBoss(topicID)
+}
+
 // ForPractice returns one random question (different each call).
 func ForPractice() Question {
 	q := allQuestions[rand.Intn(len(allQuestions))]
