@@ -2381,16 +2381,19 @@ func (s *Store) GetQuestionsByIDs(ctx context.Context, ids []string) ([]Question
 // SeedDemoUsers inserts teacher@flasky.com and newstudent@flasky.com if they don't exist.
 func (s *Store) SeedDemoUsers(ctx context.Context) error {
 	const hash = "$2a$10$o3y5LIZrjS1mNNN2bnPuH.9xBCdE9uNUS82GW6QdT.9qtHFoosHgu" // password123
-	_, err := s.db.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 		INSERT INTO students (institute_id, email, password_hash, full_name, role)
 		SELECT id, 'teacher@flasky.com', $1, 'Flasky Teacher', 'teacher'
 		FROM institutes WHERE slug = 'demo'
-		ON CONFLICT (email) DO NOTHING;
-
+		ON CONFLICT (email) DO NOTHING
+	`, hash); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO students (institute_id, email, password_hash, full_name, role)
 		SELECT id, 'newstudent@flasky.com', $1, 'Test Student', 'student'
 		FROM institutes WHERE slug = 'demo'
-		ON CONFLICT (email) DO NOTHING;
+		ON CONFLICT (email) DO NOTHING
 	`, hash)
 	return err
 }
