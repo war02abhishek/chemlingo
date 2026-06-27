@@ -22,6 +22,35 @@ func New(db *pgxpool.Pool) *Store {
 // Called once at startup so no external migration tool is required.
 func (s *Store) Migrate(ctx context.Context) error {
 	_, err := s.db.Exec(ctx, `
+		CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+		CREATE TABLE IF NOT EXISTS institutes (
+		    id         UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    name       VARCHAR(255) NOT NULL,
+		    slug       VARCHAR(100) UNIQUE NOT NULL,
+		    is_active  BOOLEAN     DEFAULT TRUE,
+		    created_at TIMESTAMPTZ DEFAULT NOW()
+		);
+
+		INSERT INTO institutes (name, slug)
+		VALUES ('Demo Institute', 'demo')
+		ON CONFLICT (slug) DO NOTHING;
+
+		CREATE TABLE IF NOT EXISTS students (
+		    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+		    institute_id    UUID        NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+		    email           VARCHAR(255) UNIQUE NOT NULL,
+		    password_hash   VARCHAR(255) NOT NULL,
+		    full_name       VARCHAR(255) NOT NULL,
+		    batch           VARCHAR(50),
+		    current_streak  INT         DEFAULT 0,
+		    max_streak      INT         DEFAULT 0,
+		    catalysts       INT         DEFAULT 0,
+		    total_xp        INT         DEFAULT 0,
+		    created_at      TIMESTAMPTZ DEFAULT NOW(),
+		    last_active_at  TIMESTAMPTZ DEFAULT NOW()
+		);
+
 		ALTER TABLE students
 		  ADD COLUMN IF NOT EXISTS rating  INT NOT NULL DEFAULT 1200,
 		  ADD COLUMN IF NOT EXISTS wins    INT NOT NULL DEFAULT 0,
