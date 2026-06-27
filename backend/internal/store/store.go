@@ -851,9 +851,7 @@ func (s *Store) UpsertTopic(ctx context.Context, slug, title, icon string, posit
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO topics (slug, title, icon, position, total_lessons)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (slug) DO UPDATE
-		  SET title = EXCLUDED.title, icon = EXCLUDED.icon,
-		      position = EXCLUDED.position, total_lessons = EXCLUDED.total_lessons
+		ON CONFLICT (slug) DO NOTHING
 	`, slug, title, icon, position, totalLessons)
 	return err
 }
@@ -863,10 +861,7 @@ func (s *Store) UpsertLesson(ctx context.Context, topicSlug, slug, title string,
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO lessons (topic_id, slug, title, position, game_mode, concept_text, xp_reward, coin_reward)
 		SELECT t.id, $2, $3, $4, $5, $6, $7, $8 FROM topics t WHERE t.slug = $1
-		ON CONFLICT (slug) DO UPDATE
-		  SET title = EXCLUDED.title, position = EXCLUDED.position,
-		      game_mode = EXCLUDED.game_mode, concept_text = EXCLUDED.concept_text,
-		      xp_reward = EXCLUDED.xp_reward, coin_reward = EXCLUDED.coin_reward
+		ON CONFLICT (slug) DO NOTHING
 	`, topicSlug, slug, title, position, gameMode, conceptText, xpReward, coinReward)
 	return err
 }

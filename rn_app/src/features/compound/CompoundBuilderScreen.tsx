@@ -384,7 +384,7 @@ export default function CompoundBuilderScreen({ navigation }: Props) {
           startTimer();
           setPhase('quiz');
         })
-        .catch(() => {});
+        .catch(() => { alert('Failed to load question. Check your connection.'); });
     };
 
     return (

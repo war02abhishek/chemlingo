@@ -102,7 +102,7 @@ const lb = StyleSheet.create({
 
 // ── Screen ─────────────────────────────────────────────────────────────────────
 
-type Phase = 'loading' | 'intro' | 'countdown' | 'quiz' | 'submitting' | 'results';
+type Phase = 'loading' | 'error' | 'intro' | 'countdown' | 'quiz' | 'submitting' | 'results';
 type QuizState = 'answering' | 'feedback';
 
 interface RecordedAnswer {
@@ -158,7 +158,7 @@ export default function SprintScreen({ navigation }: { navigation: any }) {
       } else {
         setPhase('intro');
       }
-    }).catch(() => setPhase('intro'));
+    }).catch(() => setPhase('error'));
   }, []);
 
   const loadLeaderboard = useCallback(async () => {
@@ -271,6 +271,25 @@ export default function SprintScreen({ navigation }: { navigation: any }) {
       <SafeAreaView style={s.safe}>
         {renderHeader('Periodic Sprint')}
         <View style={s.center}><ActivityIndicator size="large" color={C.accent} /></View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── ERROR
+  if (phase === 'error') {
+    return (
+      <SafeAreaView style={s.safe}>
+        {renderHeader('Periodic Sprint')}
+        <View style={s.center}>
+          <Text style={s.bigEmoji}>⚠️</Text>
+          <Text style={s.centerText}>Failed to load sprint.{'\n'}Check your connection and try again.</Text>
+          <TouchableOpacity
+            onPress={() => { setPhase('loading'); fetchSprint().then((res) => { setQuestions(res.questions); setDate(res.date); setSecsToReset(res.secs_to_reset); setPersonalBest(res.personal_best); if (res.my_submission) { setExistingSub(res.my_submission); loadLeaderboard(); setPhase('results'); } else { setPhase('intro'); } }).catch(() => setPhase('error')); }}
+            style={{ marginTop: 20, backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -394,6 +413,7 @@ export default function SprintScreen({ navigation }: { navigation: any }) {
   // ── QUIZ
   if (phase === 'quiz') {
     const q = questions[currentQ];
+    if (!q) return null;
     const progress = ((currentQ) / questions.length) * 100;
     const typeMeta = questionTypeMeta(q.type);
 

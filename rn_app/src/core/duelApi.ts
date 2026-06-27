@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-const BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:8080');
+const BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'https://flasky-qn0j.onrender.com');
 
 // Derives ws:// or wss:// from the http BASE_URL.
 export const WS_BASE = BASE_URL.replace(/^http/, 'ws');
