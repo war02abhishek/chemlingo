@@ -46,6 +46,9 @@ func main() {
 	if err := curriculum.SeedTopics(context.Background(), s); err != nil {
 		log.Fatalf("curriculum seed: %v", err)
 	}
+	if err := s.SeedDemoUsers(context.Background()); err != nil {
+		log.Fatalf("seed users: %v", err)
+	}
 
 	authHandler := handler.NewAuthHandler(s, cfg.JWTSecret)
 	profileHandler := handler.NewProfileHandler(s)
