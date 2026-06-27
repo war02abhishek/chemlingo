@@ -181,7 +181,7 @@ func (s *Store) GetPasswordHash(ctx context.Context, email string) (string, uuid
 func (s *Store) GetStudentByEmail(ctx context.Context, email string) (*model.Student, error) {
 	var st model.Student
 	err := s.db.QueryRow(ctx, `
-		SELECT s.id, s.institute_id, s.email, s.full_name, s.batch,
+		SELECT s.id, s.institute_id, s.email, s.full_name, COALESCE(s.batch, ''),
 		       s.current_streak, s.max_streak, s.catalysts, s.total_xp, s.last_active_at,
 		       s.rating, s.wins, s.losses,
 		       COALESCE(s.role, 'student'), COALESCE(s.coins, 0), COALESCE(s.hearts, 3),
