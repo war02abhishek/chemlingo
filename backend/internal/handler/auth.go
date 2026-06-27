@@ -21,13 +21,14 @@ func NewAuthHandler(s *store.Store, jwtSecret string) *AuthHandler {
 	return &AuthHandler{store: s, jwtSecret: jwtSecret}
 }
 
-func (h *AuthHandler) signTokenPair(studentID, instituteID uuid.UUID) (access, refresh string, err error) {
+func (h *AuthHandler) signTokenPair(studentID, instituteID uuid.UUID, role string) (access, refresh string, err error) {
 	access, err = jwt.NewWithClaims(jwt.SigningMethodHS256, &middleware.Claims{
 		StudentID:   studentID,
 		InstituteID: instituteID,
+		Role:        role,
 		TokenType:   "access",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
 		},
 	}).SignedString([]byte(h.jwtSecret))
 	if err != nil {
@@ -36,9 +37,10 @@ func (h *AuthHandler) signTokenPair(studentID, instituteID uuid.UUID) (access, r
 	refresh, err = jwt.NewWithClaims(jwt.SigningMethodHS256, &middleware.Claims{
 		StudentID:   studentID,
 		InstituteID: instituteID,
+		Role:        role,
 		TokenType:   "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
 		},
 	}).SignedString([]byte(h.jwtSecret))
 	return
@@ -70,7 +72,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	accessTok, refreshTok, err := h.signTokenPair(studentID, student.InstituteID)
+	accessTok, refreshTok, err := h.signTokenPair(studentID, student.InstituteID, student.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token signing failed"})
 		return
@@ -108,7 +110,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	accessTok, refreshTok, err := h.signTokenPair(student.ID, student.InstituteID)
+	accessTok, refreshTok, err := h.signTokenPair(student.ID, student.InstituteID, student.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token signing failed"})
 		return
@@ -152,7 +154,11 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	accessTok, refreshTok, err := h.signTokenPair(claims.StudentID, claims.InstituteID)
+	role := claims.Role
+	if role == "" {
+		role = "student"
+	}
+	accessTok, refreshTok, err := h.signTokenPair(claims.StudentID, claims.InstituteID, role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token signing failed"})
 		return

@@ -27,6 +27,10 @@ func teacherID(c *gin.Context) (uuid.UUID, bool) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return uuid.UUID{}, false
 	}
+	if role, _ := c.Get("role"); role != "teacher" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "teacher access required"})
+		return uuid.UUID{}, false
+	}
 	return id, true
 }
 

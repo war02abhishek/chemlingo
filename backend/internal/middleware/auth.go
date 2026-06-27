@@ -12,6 +12,7 @@ import (
 type Claims struct {
 	StudentID   uuid.UUID `json:"student_id"`
 	InstituteID uuid.UUID `json:"institute_id"`
+	Role        string    `json:"role,omitempty"`
 	TokenType   string    `json:"token_type,omitempty"` // "access" or "refresh"
 	jwt.RegisteredClaims
 }
@@ -36,6 +37,7 @@ func Auth(jwtSecret string) gin.HandlerFunc {
 
 		c.Set("student_id", claims.StudentID)
 		c.Set("institute_id", claims.InstituteID)
+		c.Set("role", claims.Role)
 		c.Next()
 	}
 }
