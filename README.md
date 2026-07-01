@@ -48,9 +48,8 @@ Student advances through Adventure Path → earns XP/coins → unlocks next less
 | Gap | Risk |
 |---|---|
 | In-memory duel match state | Server crash kills all live matches; can't run 2 pods |
-| JWT never expires meaningfully | No refresh token flow |
 | No rate limiting | `/auth/login` and `/duel/match` can be hammered |
-| No registration screen | Users must be inserted via seed script |
+| No registration screen | Users must be inserted via seed script or Supabase dashboard |
 | Manual 4-step APK rebuild | JS change takes minutes to ship |
 | Hardcoded `JWT_SECRET = "change-me-in-production"` | Must be replaced before real users |
 | No push notifications | Streak reminders, duel invites not implemented |
@@ -124,7 +123,7 @@ flasky/  (repo root: chemlingo/)
 ├── backend/                        # Go (Gin) — REST + WebSocket
 │   ├── internal/
 │   │   ├── curriculum/
-│   │   │   └── curriculum.go       # 3 topics × 5 lessons hardcoded; SeedTopics() on startup
+│   │   │   └── curriculum.go       # NEET: 7 topics × 3 lessons; seeds once (ON CONFLICT DO NOTHING)
 │   │   ├── predictor/
 │   │   │   └── predictor.go        # 26 MCQ questions; ForLesson(lessonID) → 5 seeded Qs
 │   │   ├── challenge/
@@ -159,7 +158,7 @@ flasky/  (repo root: chemlingo/)
 │   ├── App.jsx                     # Font loading + AppNavigator root
 │   ├── src/
 │   │   ├── core/
-│   │   │   ├── api.js              # Shared axios instance; JWT interceptor; BASE_URL=10.0.2.2:8080
+│   │   │   ├── api.js              # Shared axios instance; JWT interceptor; BASE_URL → production
 │   │   │   ├── curriculumApi.ts    # fetchCurriculum, fetchMyProgress, completeLesson
 │   │   │   ├── predictorApi.ts     # fetchLessonQuestions, submitLesson, fetchPracticeQuestion
 │   │   │   ├── teacherApi.ts       # fetchTeacherOverview, fetchBatchStudents, fetchInsights, etc.
@@ -194,8 +193,7 @@ flasky/  (repo root: chemlingo/)
 │   │           └── ManageScreen.tsx
 │   └── android/                    # Native Android project
 │
-└── scripts/
-    └── play_as_p2.py               # Python bot — simulates Player 2 for duel testing
+└── duel_bot.py                     # Python bot — simulates Player 2 for duel testing
 ```
 
 ### Navigation Tree
@@ -229,17 +227,23 @@ AppNavigator
 
 ## Curriculum
 
-3 topics × 5 lessons each. All lessons use the **Reaction Predictor** game (MCQ).
+**NEET-aligned** — 7 topics × 3 lessons = 21 lessons total.
 
 | Topic | Lessons |
 |---|---|
-| Physical Chemistry | States of Matter · Atomic Structure · Chemical Bonding · Thermodynamics · Electrochemistry |
-| Organic Chemistry | Hydrocarbons · Functional Groups · Organic Reactions · Polymers · Biomolecules |
-| Inorganic Chemistry | Periodic Table · s-Block Elements · p-Block Elements · d-Block Elements · Coordination Compounds |
+| Atomic Structure & Periodicity | Atomic Structure · Periodic Table & Trends · Chemical Bonding |
+| Mole, Matter & Solutions | Mole Concept & Stoichiometry · States of Matter · Solutions & Colligative Properties |
+| Thermodynamics & Equilibrium | Thermodynamics · Chemical Equilibrium · Solid State & Surface Chemistry |
+| Electrochemistry & Kinetics | Redox & Electrochemistry · Chemical Kinetics · Hydrogen & s-Block Elements |
+| Inorganic Chemistry | p-Block Elements · d & f Block Elements · Coordination Compounds & Metallurgy |
+| Organic Chemistry I | Basic Organic Concepts & Hydrocarbons · Haloalkanes, Alcohols & Ethers · Aldehydes, Ketones & Carboxylic Acids |
+| Organic Chemistry II | Amines & Diazonium Salts · Biomolecules · Polymers & Everyday Chemistry |
 
-Lessons unlock sequentially. Complete all 5 → Boss Battle node unlocks (10 mixed questions, 70% to pass).
+Lessons unlock sequentially within each topic. Complete all 3 → Boss Battle node unlocks (10 mixed questions, 70% to pass).
 
-Question bank: 26 MCQ reactions across all three topics in `backend/internal/predictor/predictor.go`. Each lesson deterministically picks 5 using FNV32a seed on lesson UUID.
+**Editing curriculum:** topics and lessons are in the `topics` / `lessons` tables in Supabase. The Go seed (`curriculum.go`) only inserts rows that don't yet exist (`ON CONFLICT DO NOTHING`), so edits made directly in Supabase persist across deploys.
+
+Question bank: 26 MCQ reactions in `backend/internal/predictor/predictor.go`. Each lesson picks 5 deterministically via FNV32a seed on lesson UUID.
 
 ---
 
@@ -331,24 +335,49 @@ adb shell am start -n com.chemlingo.app/.MainActivity
 
 ---
 
+## Production Deployment
+
+| Service | Provider | URL / Notes |
+|---|---|---|
+| Backend (Go/Gin) | Render.com | `https://flasky-qn0j.onrender.com` — auto-deploys on push to `main` |
+| Database (PostgreSQL) | Supabase | Supavisor pooler (IPv4 compatible) |
+| Cache / Pub-Sub (Redis) | Upstash | TLS — `rediss://...` |
+
+**APK for physical device testing:**
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+cd rn_app/android
+./gradlew assembleRelease   # → app/build/outputs/apk/release/app-release.apk (≈29 MB)
+```
+Share the release APK directly (WhatsApp, AirDrop) — no Play Store needed for testing.
+
+---
+
 ## Test Credentials
 
 | Role | Email | Password |
 |---|---|---|
-| Student | `test@chemlingo.com` | `password123` |
+| Student | `newstudent@flasky.com` | `password123` |
 | Teacher | `teacher@flasky.com` | `password123` |
 
 ---
 
 ## Testing Multiplayer Duel
 
-One emulator is enough. Player 2 is a Python bot:
+One device is enough. A Python bot acts as Player 2:
 
 ```bash
-python3 scripts/play_as_p2.py
+# Install deps once
+pip3 install websocket-client requests
+
+# Fast bot (wins instantly)
+python3 -u -W ignore duel_bot.py
+
+# Slow bot (2-3s delay per answer — gives you a chance to win)
+python3 -u -W ignore duel_bot.py --slow
 ```
 
-The bot joins the queue, auto-submits the correct answer after 3 seconds. Increase the `await asyncio.sleep(3)` delay in the script to give yourself more time.
+The bot logs in as `newstudent@flasky.com`, joins the matchmaking queue, and auto-submits the correct coefficients. Open Duel on your device and tap **Find Match** — they pair instantly.
 
 ---
 
@@ -614,7 +643,7 @@ The conn key in Redis acts as a "player is alive" signal that any pod can check.
 | NDK 26.1.10909125 exactly | NDK 30 causes C++ compile errors in expo-modules-core |
 | `--dev false` in bundle command | Dev mode bundle is too large and slow for the emulator |
 | `getUseDeveloperSupport = false` in MainApplication.kt | Forces embedded bundle; don't revert without restoring Metro |
-| `index.js` registers as `'main'` | Must match `getMainComponentName()` in `MainActivity.kt`; `registerRootComponent` registers as `'ChemLingo'` and crashes |
+| `package.json` `"main"` must be `"index.js"` | Expo's bundler uses this as the entry point; `index.js` calls `AppRegistry.registerComponent('main', ...)` which must match `getMainComponentName()` in `MainActivity.kt` |
 | `pgvector` not in plain Postgres | Full `infra/db/init.sql` won't run without the extension; use `cmd/migrate/main.go` instead |
 
 ---
